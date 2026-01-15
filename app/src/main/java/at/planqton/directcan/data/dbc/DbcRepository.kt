@@ -9,7 +9,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import android.util.Log
 import java.io.File
+
+private const val TAG = "DbcRepository"
 
 class DbcRepository(private val context: Context) {
 
@@ -55,30 +58,46 @@ class DbcRepository(private val context: Context) {
 
     suspend fun importDbcFromUri(uri: Uri, name: String? = null): Result<DbcFileInfo> = withContext(Dispatchers.IO) {
         try {
+            Log.d(TAG, "importDbcFromUri: uri=$uri")
+
             val inputStream = context.contentResolver.openInputStream(uri)
-                ?: return@withContext Result.failure(Exception("Cannot open file"))
+            if (inputStream == null) {
+                Log.e(TAG, "Cannot open input stream for uri: $uri")
+                return@withContext Result.failure(Exception("Cannot open file"))
+            }
 
             val content = inputStream.bufferedReader().readText()
             inputStream.close()
+            Log.d(TAG, "Read ${content.length} bytes from file")
 
             val parser = DbcParser()
             val dbcFile = parser.parse(content)
+            Log.d(TAG, "Parsed DBC: ${dbcFile.messages.size} messages")
 
             // Ensure directory exists
             val dir = dbcDir
+            Log.d(TAG, "dbcDir path: ${dir.absolutePath}, exists: ${dir.exists()}")
             if (!dir.exists()) {
-                dir.mkdirs()
+                val created = dir.mkdirs()
+                Log.d(TAG, "Created directory: $created")
             }
 
-            val fileName = name ?: uri.lastPathSegment?.substringBeforeLast(".") ?: "imported"
+            // Clean filename from URI
+            val rawFileName = name ?: uri.lastPathSegment?.substringAfterLast("/")?.substringBeforeLast(".") ?: "imported"
+            val fileName = rawFileName.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            Log.d(TAG, "fileName: $fileName (raw: $rawFileName)")
+
             val targetFile = File(dir, "$fileName.dbc")
+            Log.d(TAG, "targetFile: ${targetFile.absolutePath}")
 
             // Save original DBC
             targetFile.writeText(content)
+            Log.d(TAG, "Saved DBC file")
 
             // Also save parsed JSON for faster loading
             val jsonFile = File(dir, "$fileName.json")
             jsonFile.writeText(json.encodeToString(dbcFile))
+            Log.d(TAG, "Saved JSON file")
 
             refreshDbcList()
 
@@ -90,8 +109,10 @@ class DbcRepository(private val context: Context) {
                 lastModified = targetFile.lastModified()
             )
 
+            Log.d(TAG, "Import successful: $info")
             Result.success(info)
         } catch (e: Exception) {
+            Log.e(TAG, "Import failed", e)
             Result.failure(e)
         }
     }
