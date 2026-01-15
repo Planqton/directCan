@@ -39,7 +39,7 @@ class DbcRepository(private val context: Context) {
 
     fun refreshDbcList() {
         val files = dbcDir.listFiles()
-            ?.filter { it.extension == "dbc" || it.extension == "json" }
+            ?.filter { it.extension == "dbc" }  // Only show .dbc files, not .json
             ?.map { file ->
                 DbcFileInfo(
                     name = file.nameWithoutExtension,

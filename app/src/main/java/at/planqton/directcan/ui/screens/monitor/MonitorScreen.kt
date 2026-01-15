@@ -336,6 +336,7 @@ fun MonitorScreen() {
                     ) {
                         val sortedIds = knownIds.sorted()
                         items(sortedIds) { id ->
+                            val dbcMessage = activeDbc?.findMessage(id)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()
@@ -348,11 +349,21 @@ fun MonitorScreen() {
                                     modifier = Modifier.size(24.dp)
                                 )
                                 Spacer(Modifier.width(4.dp))
-                                Text(
-                                    "0x${id.toString(16).uppercase().padStart(3, '0')}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontFamily = FontFamily.Monospace
-                                )
+                                Column {
+                                    Text(
+                                        "0x${id.toString(16).uppercase().padStart(3, '0')}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    if (dbcMessage != null) {
+                                        Text(
+                                            dbcMessage.name,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

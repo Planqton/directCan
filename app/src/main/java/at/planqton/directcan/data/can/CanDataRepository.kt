@@ -210,6 +210,14 @@ class CanDataRepository(private val context: Context) {
     }
 
     /**
+     * Restore frame filter from saved settings
+     */
+    fun restoreFrameFilter(filter: Map<Long, Boolean>) {
+        _frameFilter.value = filter
+        _knownIds.value = filter.keys
+    }
+
+    /**
      * Process incoming CAN frame - updates all data structures
      */
     fun processFrame(frame: CanFrame) {

@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -116,6 +117,77 @@ fun HomeScreen() {
                             )
                         }
                     }
+                }
+            }
+
+            // Reset Stats Card
+            item {
+                var showResetDialog by remember { mutableStateOf(false) }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.DeleteForever,
+                                contentDescription = null,
+                                modifier = Modifier.size(32.dp),
+                                tint = Color(0xFFF44336)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Statistiken zurücksetzen",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    "Filter, aktive DBC und alle Daten löschen",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Button(
+                                onClick = { showResetDialog = true },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFF44336)
+                                )
+                            ) {
+                                Text("Reset Stats")
+                            }
+                        }
+                    }
+                }
+
+                if (showResetDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showResetDialog = false },
+                        icon = { Icon(Icons.Default.Warning, contentDescription = null) },
+                        title = { Text("Alle Daten zurücksetzen?") },
+                        text = {
+                            Text("Dies löscht alle Filter, die aktive DBC-Zuordnung, alle gespeicherten Einstellungen und alle erfassten Daten. Diese Aktion kann nicht rückgängig gemacht werden.")
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    DirectCanApplication.instance.resetAllStats()
+                                    showResetDialog = false
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFF44336)
+                                )
+                            ) {
+                                Text("Zurücksetzen")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showResetDialog = false }) {
+                                Text("Abbrechen")
+                            }
+                        }
+                    )
                 }
             }
 
