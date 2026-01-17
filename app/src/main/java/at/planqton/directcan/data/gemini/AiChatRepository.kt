@@ -56,7 +56,10 @@ data class ChatSession(
     val snapshotData: String,
     val messages: List<ChatMessage>,
     val createdAt: Long = System.currentTimeMillis(),
-    val linkedDbcPath: String? = null  // Path to linked DBC file for AI-generated definitions
+    val linkedDbcPath: String? = null,  // Path to linked DBC file for AI-generated definitions
+    val providerType: String? = null,   // Provider used for this chat (e.g. "OPENCODE_ZEN")
+    val modelId: String? = null,        // Model ID used for this chat
+    val apiKey: String? = null          // API key used for this chat (encrypted in real app)
 )
 
 class AiChatRepository(private val context: Context) {
@@ -69,6 +72,7 @@ class AiChatRepository(private val context: Context) {
         val OPENAI_API_KEY = stringPreferencesKey("openai_api_key")
         val ANTHROPIC_API_KEY = stringPreferencesKey("anthropic_api_key")
         val OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
+        val OPENCODE_ZEN_API_KEY = stringPreferencesKey("opencode_zen_api_key")
         val SELECTED_MODEL = stringPreferencesKey("gemini_selected_model")
         val CHAT_SESSIONS = stringPreferencesKey("gemini_chat_sessions")
         val ACTIVE_CHAT_ID = stringPreferencesKey("gemini_active_chat_id")
@@ -119,6 +123,7 @@ class AiChatRepository(private val context: Context) {
     val openAiApiKey: Flow<String?> = context.aiChatDataStore.data.map { it[Keys.OPENAI_API_KEY] }
     val anthropicApiKey: Flow<String?> = context.aiChatDataStore.data.map { it[Keys.ANTHROPIC_API_KEY] }
     val openRouterApiKey: Flow<String?> = context.aiChatDataStore.data.map { it[Keys.OPENROUTER_API_KEY] }
+    val openCodeZenApiKey: Flow<String?> = context.aiChatDataStore.data.map { it[Keys.OPENCODE_ZEN_API_KEY] }
 
     // Get API key for current provider
     fun getApiKeyForProvider(provider: AiProviderType): Flow<String?> = when (provider) {
@@ -126,6 +131,7 @@ class AiChatRepository(private val context: Context) {
         AiProviderType.OPENAI -> openAiApiKey
         AiProviderType.ANTHROPIC -> anthropicApiKey
         AiProviderType.OPENROUTER -> openRouterApiKey
+        AiProviderType.OPENCODE_ZEN -> openCodeZenApiKey
     }
 
     // Selected Model
@@ -154,6 +160,7 @@ class AiChatRepository(private val context: Context) {
             AiProviderType.OPENAI -> Keys.OPENAI_API_KEY
             AiProviderType.ANTHROPIC -> Keys.ANTHROPIC_API_KEY
             AiProviderType.OPENROUTER -> Keys.OPENROUTER_API_KEY
+            AiProviderType.OPENCODE_ZEN -> Keys.OPENCODE_ZEN_API_KEY
         }
         context.aiChatDataStore.edit { it[keyPref] = key }
         if (key.isNotBlank() && providerType == _currentProvider.value) {
@@ -174,9 +181,12 @@ class AiChatRepository(private val context: Context) {
             AiProviderType.OPENAI -> Keys.OPENAI_API_KEY
             AiProviderType.ANTHROPIC -> Keys.ANTHROPIC_API_KEY
             AiProviderType.OPENROUTER -> Keys.OPENROUTER_API_KEY
+            AiProviderType.OPENCODE_ZEN -> Keys.OPENCODE_ZEN_API_KEY
         }
-        val key = apiKey ?: context.aiChatDataStore.data.first()[keyPref]
-        if (key.isNullOrBlank()) {
+        val key = apiKey ?: context.aiChatDataStore.data.first()[keyPref] ?: ""
+
+        // OpenCode Zen doesn't require API key, others do
+        if (key.isBlank() && providerType != AiProviderType.OPENCODE_ZEN) {
             _availableModels.value = emptyList()
             return
         }
@@ -260,11 +270,13 @@ class AiChatRepository(private val context: Context) {
             AiProviderType.OPENAI -> Keys.OPENAI_API_KEY
             AiProviderType.ANTHROPIC -> Keys.ANTHROPIC_API_KEY
             AiProviderType.OPENROUTER -> Keys.OPENROUTER_API_KEY
+            AiProviderType.OPENCODE_ZEN -> Keys.OPENCODE_ZEN_API_KEY
         }
-        val key = context.aiChatDataStore.data.first()[keyPref]
+        val key = context.aiChatDataStore.data.first()[keyPref] ?: ""
         val model = context.aiChatDataStore.data.first()[Keys.SELECTED_MODEL]
 
-        if (key.isNullOrBlank() || model.isNullOrBlank()) {
+        // OpenCode Zen doesn't require API key
+        if ((key.isBlank() && providerType != AiProviderType.OPENCODE_ZEN) || model.isNullOrBlank()) {
             _error.value = "Kein API-Key oder Modell konfiguriert"
             return false
         }
@@ -328,11 +340,27 @@ class AiChatRepository(private val context: Context) {
     suspend fun createChatSession(snapshotName: String, snapshotData: String): String {
         val sessionId = "chat_${System.currentTimeMillis()}"
         Log.i(TAG, "Creating chat session: $snapshotName (id: $sessionId)")
+
+        // Get current provider, model, and API key
+        val prefs = context.aiChatDataStore.data.first()
+        val currentProviderType = _currentProvider.value
+        val currentModelId = prefs[Keys.SELECTED_MODEL]
+        val currentApiKey = when (currentProviderType) {
+            AiProviderType.GEMINI -> prefs[Keys.API_KEY]
+            AiProviderType.OPENAI -> prefs[Keys.OPENAI_API_KEY]
+            AiProviderType.ANTHROPIC -> prefs[Keys.ANTHROPIC_API_KEY]
+            AiProviderType.OPENROUTER -> prefs[Keys.OPENROUTER_API_KEY]
+            AiProviderType.OPENCODE_ZEN -> prefs[Keys.OPENCODE_ZEN_API_KEY]
+        }
+
         val session = ChatSession(
             id = sessionId,
             snapshotName = snapshotName,
             snapshotData = snapshotData,
-            messages = emptyList()
+            messages = emptyList(),
+            providerType = currentProviderType.name,
+            modelId = currentModelId,
+            apiKey = currentApiKey ?: ""
         )
         _chatSessions.value = _chatSessions.value + session
         _activeChatId.value = sessionId
@@ -360,12 +388,27 @@ class AiChatRepository(private val context: Context) {
 
         val dbcPath = dbcResult.getOrNull()?.path
 
+        // Get current provider, model, and API key
+        val prefs = context.aiChatDataStore.data.first()
+        val currentProviderType = _currentProvider.value
+        val currentModelId = prefs[Keys.SELECTED_MODEL]
+        val currentApiKey = when (currentProviderType) {
+            AiProviderType.GEMINI -> prefs[Keys.API_KEY]
+            AiProviderType.OPENAI -> prefs[Keys.OPENAI_API_KEY]
+            AiProviderType.ANTHROPIC -> prefs[Keys.ANTHROPIC_API_KEY]
+            AiProviderType.OPENROUTER -> prefs[Keys.OPENROUTER_API_KEY]
+            AiProviderType.OPENCODE_ZEN -> prefs[Keys.OPENCODE_ZEN_API_KEY]
+        }
+
         val session = ChatSession(
             id = sessionId,
             snapshotName = snapshotName,
             snapshotData = snapshotData,
             messages = emptyList(),
-            linkedDbcPath = dbcPath
+            linkedDbcPath = dbcPath,
+            providerType = currentProviderType.name,
+            modelId = currentModelId,
+            apiKey = currentApiKey ?: ""
         )
 
         _chatSessions.value = _chatSessions.value + session
@@ -551,26 +594,50 @@ class AiChatRepository(private val context: Context) {
         return _chatSessions.value.find { it.id == id }
     }
 
-    suspend fun sendMessage(chatId: String, userMessage: String): String? {
-        val providerType = _currentProvider.value
-        val keyPref = when (providerType) {
-            AiProviderType.GEMINI -> Keys.API_KEY
-            AiProviderType.OPENAI -> Keys.OPENAI_API_KEY
-            AiProviderType.ANTHROPIC -> Keys.ANTHROPIC_API_KEY
-            AiProviderType.OPENROUTER -> Keys.OPENROUTER_API_KEY
-        }
-        val key = context.aiChatDataStore.data.first()[keyPref]
-        val modelId = context.aiChatDataStore.data.first()[Keys.SELECTED_MODEL]
+    suspend fun sendMessage(
+        chatId: String,
+        userMessage: String,
+        skipSnapshot: Boolean = false,
+        requestDbcUpdate: Boolean = false
+    ): String? {
+        val session = _chatSessions.value.find { it.id == chatId } ?: return null
 
-        if (key.isNullOrBlank() || modelId.isNullOrBlank()) {
+        // Use session's stored provider/model/key, or fall back to current settings for old chats
+        val providerType = session.providerType?.let {
+            try { AiProviderType.valueOf(it) } catch (e: Exception) { null }
+        } ?: _currentProvider.value
+
+        val modelId = session.modelId ?: context.aiChatDataStore.data.first()[Keys.SELECTED_MODEL]
+
+        val key = if (session.apiKey != null) {
+            session.apiKey
+        } else {
+            // Fall back to current settings for old chats
+            val keyPref = when (providerType) {
+                AiProviderType.GEMINI -> Keys.API_KEY
+                AiProviderType.OPENAI -> Keys.OPENAI_API_KEY
+                AiProviderType.ANTHROPIC -> Keys.ANTHROPIC_API_KEY
+                AiProviderType.OPENROUTER -> Keys.OPENROUTER_API_KEY
+                AiProviderType.OPENCODE_ZEN -> Keys.OPENCODE_ZEN_API_KEY
+            }
+            context.aiChatDataStore.data.first()[keyPref] ?: ""
+        }
+
+        // OpenCode Zen doesn't require API key
+        if ((key.isBlank() && providerType != AiProviderType.OPENCODE_ZEN) || modelId.isNullOrBlank()) {
             _error.value = "Kein API-Key oder Modell konfiguriert"
             return null
         }
 
-        val session = _chatSessions.value.find { it.id == chatId } ?: return null
-
         _isLoading.value = true
         _error.value = null
+
+        // Add user message immediately so it appears in UI right away
+        val userChatMessage = ChatMessage("user", userMessage)
+        val sessionWithUserMessage = session.copy(messages = session.messages + userChatMessage)
+        _chatSessions.value = _chatSessions.value.map {
+            if (it.id == chatId) sessionWithUserMessage else it
+        }
 
         try {
             // Check if delta mode is enabled and apply compression
@@ -584,11 +651,18 @@ class AiChatRepository(private val context: Context) {
             // System context with snapshot data and DBC context
             val systemPrompt = buildString {
                 appendLine("Du bist ein CAN-Bus Analyse-Assistent.")
-                appendLine("Der Benutzer hat einen Snapshot von CAN-Bus Frames, den du analysieren sollst.")
-                appendLine()
-                appendLine("SNAPSHOT DATEN (${session.snapshotName}):")
-                appendLine(snapshotForAI)
-                appendLine()
+
+                if (skipSnapshot) {
+                    appendLine("Beantworte die Frage des Benutzers ohne auf spezifische Snapshot-Daten einzugehen.")
+                    appendLine("Dies ist eine allgemeine Frage.")
+                    appendLine()
+                } else {
+                    appendLine("Der Benutzer hat einen Snapshot von CAN-Bus Frames, den du analysieren sollst.")
+                    appendLine()
+                    appendLine("SNAPSHOT DATEN (${session.snapshotName}):")
+                    appendLine(snapshotForAI)
+                    appendLine()
+                }
 
                 // Add DBC context if linked
                 if (session.linkedDbcPath != null) {
@@ -629,7 +703,12 @@ class AiChatRepository(private val context: Context) {
 
                 appendLine("Hilf dem Benutzer bei der Analyse dieser CAN-Bus Daten.")
                 appendLine("Erkläre Frame-IDs, Datenbytes, mögliche Signale und ihre Bedeutung.")
-                appendLine("Antworte auf Deutsch.")
+                appendLine()
+                appendLine("STIL:")
+                appendLine("- Antworte kurz, direkt und technisch.")
+                appendLine("- Keine Floskeln, keine Höflichkeitsphrasen.")
+                appendLine("- Komm direkt zum Punkt.")
+                appendLine("- Antworte in der Sprache des Benutzers (Deutsch oder Englisch).")
             }
 
             // Build message history
@@ -637,7 +716,14 @@ class AiChatRepository(private val context: Context) {
             session.messages.forEach { msg ->
                 messages.add(msg.toAiMessage())
             }
-            messages.add(AiMessage("user", userMessage))
+
+            // Add DBC update request suffix if requested
+            val finalMessage = if (requestDbcUpdate && session.linkedDbcPath != null) {
+                "$userMessage\n\nBitte erstelle die passenden DBC-Einträge (Messages und Signale) basierend auf dieser Analyse und gib die JSON-Befehle aus."
+            } else {
+                userMessage
+            }
+            messages.add(AiMessage("user", finalMessage))
 
             // Use the provider abstraction
             val provider = AiProviderFactory.getProvider(providerType)
@@ -653,12 +739,10 @@ class AiChatRepository(private val context: Context) {
                 }
             }
 
-            // Update session with new messages
-            val updatedMessages = session.messages + listOf(
-                ChatMessage("user", userMessage),
-                ChatMessage("model", responseText)
-            )
-            val updatedSession = session.copy(messages = updatedMessages)
+            // Update session with AI response (user message was already added above)
+            val currentSession = _chatSessions.value.find { it.id == chatId } ?: return null
+            val updatedMessages = currentSession.messages + ChatMessage("model", responseText)
+            val updatedSession = currentSession.copy(messages = updatedMessages)
             _chatSessions.value = _chatSessions.value.map {
                 if (it.id == chatId) updatedSession else it
             }

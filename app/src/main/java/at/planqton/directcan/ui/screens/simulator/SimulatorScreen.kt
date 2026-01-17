@@ -12,12 +12,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import at.planqton.directcan.DirectCanApplication
+import at.planqton.directcan.data.device.DeviceType
+import at.planqton.directcan.data.device.SimulatorDevice
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SimulatorScreen() {
-    val usbManager = DirectCanApplication.instance.usbSerialManager
-    val simulator = usbManager.simulator
+    val deviceManager = DirectCanApplication.instance.deviceManager
+
+    // Find the simulator device from configured devices
+    val simulatorDevice = remember {
+        deviceManager.devices.value.filterIsInstance<SimulatorDevice>().firstOrNull()
+    }
+
+    // Fallback to creating a temporary simulator if none configured
+    val simulator = simulatorDevice?.simulator ?: remember {
+        at.planqton.directcan.data.can.CanSimulator()
+    }
 
     val engineRunning by simulator.engineRunning.collectAsState()
     val rpm by simulator.rpm.collectAsState()

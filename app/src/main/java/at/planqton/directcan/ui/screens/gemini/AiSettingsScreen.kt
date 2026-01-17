@@ -44,13 +44,15 @@ fun AiSettingsScreen(
     val openAiApiKey by aiRepository.openAiApiKey.collectAsState(initial = null)
     val anthropicApiKey by aiRepository.anthropicApiKey.collectAsState(initial = null)
     val openRouterApiKey by aiRepository.openRouterApiKey.collectAsState(initial = null)
+    val openCodeZenApiKey by aiRepository.openCodeZenApiKey.collectAsState(initial = null)
 
-    // Get current API key based on provider
+    // Get current API key based on provider (OpenCode Zen doesn't need one)
     val apiKey = when (currentProvider) {
         AiProviderType.GEMINI -> geminiApiKey
         AiProviderType.OPENAI -> openAiApiKey
         AiProviderType.ANTHROPIC -> anthropicApiKey
         AiProviderType.OPENROUTER -> openRouterApiKey
+        AiProviderType.OPENCODE_ZEN -> openCodeZenApiKey ?: ""  // Optional, default to empty
     }
 
     val selectedModel by aiRepository.selectedModel.collectAsState(initial = null)
@@ -88,9 +90,9 @@ fun AiSettingsScreen(
         }
     }
 
-    // Load models when API key is available
-    LaunchedEffect(apiKey) {
-        if (!apiKey.isNullOrBlank()) {
+    // Load models when API key is available or for OpenCode Zen (no key needed)
+    LaunchedEffect(apiKey, currentProvider) {
+        if (!apiKey.isNullOrBlank() || currentProvider == AiProviderType.OPENCODE_ZEN) {
             try {
                 aiRepository.loadAvailableModels()
             } catch (e: Exception) {
@@ -136,6 +138,7 @@ fun AiSettingsScreen(
                     AiProviderType.OPENAI -> "OpenAI"
                     AiProviderType.ANTHROPIC -> "Anthropic Claude"
                     AiProviderType.OPENROUTER -> "OpenRouter (Free Models!)"
+                    AiProviderType.OPENCODE_ZEN -> "OpenCode Zen (Free!)"
                 }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -166,40 +169,43 @@ fun AiSettingsScreen(
                 }
             }
 
-            // API Key
-            item {
-                val keyHint = when (currentProvider) {
-                    AiProviderType.GEMINI -> "ai.google.dev"
-                    AiProviderType.OPENAI -> "platform.openai.com"
-                    AiProviderType.ANTHROPIC -> "console.anthropic.com"
-                    AiProviderType.OPENROUTER -> "openrouter.ai (kostenlos!)"
-                }
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = { showApiKeyDialog = true }
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+            // API Key (not shown for OpenCode Zen as it's optional)
+            if (currentProvider != AiProviderType.OPENCODE_ZEN) {
+                item {
+                    val keyHint = when (currentProvider) {
+                        AiProviderType.GEMINI -> "ai.google.dev"
+                        AiProviderType.OPENAI -> "platform.openai.com"
+                        AiProviderType.ANTHROPIC -> "console.anthropic.com"
+                        AiProviderType.OPENROUTER -> "openrouter.ai (kostenlos!)"
+                        AiProviderType.OPENCODE_ZEN -> "optional"
+                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { showApiKeyDialog = true }
                     ) {
-                        Icon(
-                            Icons.Default.Key,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("API Key", style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                if (apiKey.isNullOrBlank()) "Nicht konfiguriert ($keyHint)"
-                                else "****${apiKey.takeLast(4)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Key,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
                             )
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("API Key", style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    if (apiKey.isNullOrBlank()) "Nicht konfiguriert ($keyHint)"
+                                    else "****${apiKey.takeLast(4)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Icon(Icons.Default.ChevronRight, contentDescription = null)
                         }
-                        Icon(Icons.Default.ChevronRight, contentDescription = null)
                     }
                 }
             }
@@ -210,7 +216,8 @@ fun AiSettingsScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
-                        if (!apiKey.isNullOrBlank()) {
+                        // OpenCode Zen doesn't need API key
+                        if (!apiKey.isNullOrBlank() || currentProvider == AiProviderType.OPENCODE_ZEN) {
                             showModelDialog = true
                         }
                     }
@@ -290,6 +297,10 @@ fun AiSettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // OpenCode Zen doesn't require API key
+                    val canUseAi = (!apiKey.isNullOrBlank() || currentProvider == AiProviderType.OPENCODE_ZEN)
+                        && !selectedModel.isNullOrBlank() && !isLoading
+
                     Button(
                         onClick = {
                             scope.launch {
@@ -297,7 +308,7 @@ fun AiSettingsScreen(
                                 testResult = aiRepository.testConnection()
                             }
                         },
-                        enabled = !apiKey.isNullOrBlank() && !selectedModel.isNullOrBlank() && !isLoading,
+                        enabled = canUseAi,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.NetworkCheck, contentDescription = null)
@@ -308,22 +319,16 @@ fun AiSettingsScreen(
                     Button(
                         onClick = {
                             scope.launch {
-                                // Create a test chat session with sample CAN data
-                                val testData = """
-                                    |Test CAN-Bus Snapshot
-                                    |====================
-                                    |Frame 1: ID=0x123 Data=[01 02 03 04 05 06 07 08]
-                                    |Frame 2: ID=0x456 Data=[FF EE DD CC BB AA 99 88]
-                                    |Frame 3: ID=0x7DF Data=[02 01 0C 00 00 00 00 00] (OBD-II RPM Request)
-                                """.trimMargin()
+                                // Create a simple test chat to verify API connection
+                                val testData = "API Verbindungstest - Bitte bestätige dass alles funktioniert."
                                 val chatId = aiRepository.createChatSession(
-                                    snapshotName = "Test-Chat",
+                                    snapshotName = "API-Test",
                                     snapshotData = testData
                                 )
                                 onNavigateToChat(chatId)
                             }
                         },
-                        enabled = !apiKey.isNullOrBlank() && !selectedModel.isNullOrBlank() && !isLoading,
+                        enabled = canUseAi,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Chat, contentDescription = null)

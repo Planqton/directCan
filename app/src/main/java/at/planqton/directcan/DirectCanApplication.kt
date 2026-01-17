@@ -11,6 +11,8 @@ import at.planqton.directcan.data.settings.SettingsRepository
 import at.planqton.directcan.data.txscript.TxScriptExecutor
 import at.planqton.directcan.data.txscript.TxScriptRepository
 import at.planqton.directcan.data.usb.UsbSerialManager
+import at.planqton.directcan.data.device.ConnectionState
+import at.planqton.directcan.data.device.DeviceManager
 import at.planqton.directcan.service.CanLoggingService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +46,9 @@ class DirectCanApplication : Application() {
     lateinit var txScriptExecutor: TxScriptExecutor
         private set
 
+    lateinit var deviceManager: DeviceManager
+        private set
+
     private val scope = CoroutineScope(Dispatchers.IO + Job())
 
     override fun onCreate() {
@@ -59,6 +64,7 @@ class DirectCanApplication : Application() {
         aiChatRepository = AiChatRepository(this)
         txScriptRepository = TxScriptRepository(this)
         txScriptExecutor = TxScriptExecutor(usbSerialManager, canDataRepository)
+        deviceManager = DeviceManager(this)
         Log.d(TAG, "All repositories initialized")
 
         // Install default DBC files and restore settings on startup
@@ -70,20 +76,20 @@ class DirectCanApplication : Application() {
         // Auto-start logging when connected if enabled
         scope.launch {
             combine(
-                usbSerialManager.connectionState,
+                deviceManager.connectionState,
                 canDataRepository.autoStartLogging
             ) { connectionState, autoStart ->
                 connectionState to autoStart
             }.collect { (connectionState, autoStart) ->
                 Log.d(TAG, "Connection state: $connectionState, autoStart: $autoStart")
-                if (connectionState == UsbSerialManager.ConnectionState.CONNECTED && autoStart) {
+                if (connectionState == ConnectionState.CONNECTED && autoStart) {
                     if (!canDataRepository.isLogging.value) {
-                        Log.i(TAG, "Auto-starting logging on USB connect")
+                        Log.i(TAG, "Auto-starting logging on device connect")
                         CanLoggingService.start(this@DirectCanApplication)
                     }
-                } else if (connectionState == UsbSerialManager.ConnectionState.DISCONNECTED) {
+                } else if (connectionState == ConnectionState.DISCONNECTED) {
                     if (CanLoggingService.isRunning.value) {
-                        Log.i(TAG, "Stopping logging due to USB disconnect")
+                        Log.i(TAG, "Stopping logging due to device disconnect")
                         CanLoggingService.stop(this@DirectCanApplication)
                         canDataRepository.setLoggingActive(false)
                     }
@@ -106,8 +112,9 @@ class DirectCanApplication : Application() {
         }
 
         // Collect CAN frames centrally - feeds Monitor, Sniffer, and Snapshot data
+        // Use DeviceManager for all device connections (USB Serial, Simulator, PEAK CAN)
         scope.launch {
-            usbSerialManager.receivedLines.collect { line ->
+            deviceManager.receivedLines.collect { line ->
                 CanFrame.fromTextLine(line)?.let { frame ->
                     canDataRepository.processFrame(frame)
                 }

@@ -88,6 +88,7 @@ fun AiChatScreen(
     var messageInput by remember { mutableStateOf("") }
     val dateFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     var showChatSwitcher by remember { mutableStateOf(false) }
+    var showSendOptions by remember { mutableStateOf(false) }
 
     // Response parser for DBC commands
     val responseParser = remember { GeminiResponseParser() }
@@ -123,10 +124,11 @@ fun AiChatScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 if (currentSession != null) {
+                                    val modelInfo = currentSession.modelId ?: "Kein Modell"
                                     Text(
-                                        "${currentSession.messages.size} Nachrichten",
+                                        modelInfo,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
@@ -163,9 +165,9 @@ fun AiChatScreen(
                                                     style = MaterialTheme.typography.bodyMedium
                                                 )
                                                 Text(
-                                                    "${session.messages.size} Nachrichten",
+                                                    session.modelId ?: "Kein Modell",
                                                     style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    color = MaterialTheme.colorScheme.primary
                                                 )
                                             }
                                         }
@@ -523,6 +525,69 @@ fun AiChatScreen(
                             enabled = !isLoading
                         )
                         Spacer(Modifier.width(8.dp))
+                        // Options dropdown button
+                        Box {
+                            IconButton(
+                                onClick = { showSendOptions = true },
+                                enabled = messageInput.isNotBlank() && !isLoading
+                            ) {
+                                Icon(Icons.Default.MoreVert, "Optionen")
+                            }
+                            DropdownMenu(
+                                expanded = showSendOptions,
+                                onDismissRequest = { showSendOptions = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("DBC erstellen") },
+                                    leadingIcon = { Icon(Icons.Default.Storage, null) },
+                                    onClick = {
+                                        showSendOptions = false
+                                        if (messageInput.isNotBlank() && !isLoading) {
+                                            val message = messageInput
+                                            messageInput = ""
+                                            scope.launch {
+                                                val response = aiRepository.sendMessage(
+                                                    chatId, message,
+                                                    skipSnapshot = false,
+                                                    requestDbcUpdate = true
+                                                )
+                                                if (response != null && linkedDbcInfo != null) {
+                                                    val parsed = responseParser.parseResponse(response)
+                                                    if (parsed.hasCommands) {
+                                                        aiRepository.executeDbcCommands(
+                                                            linkedDbcInfo,
+                                                            parsed.dbcCommands,
+                                                            dbcRepository
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = linkedDbcInfo != null
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Ohne Snapshot") },
+                                    leadingIcon = { Icon(Icons.Default.QuestionAnswer, null) },
+                                    onClick = {
+                                        showSendOptions = false
+                                        if (messageInput.isNotBlank() && !isLoading) {
+                                            val message = messageInput
+                                            messageInput = ""
+                                            scope.launch {
+                                                aiRepository.sendMessage(
+                                                    chatId, message,
+                                                    skipSnapshot = true,
+                                                    requestDbcUpdate = false
+                                                )
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        // Send button
                         FilledIconButton(
                             onClick = {
                                 if (messageInput.isNotBlank() && !isLoading) {

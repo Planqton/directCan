@@ -1,12 +1,14 @@
 package at.planqton.directcan
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,6 +49,7 @@ import at.planqton.directcan.ui.screens.gemini.AiSettingsScreen
 import at.planqton.directcan.ui.screens.gemini.AiChatScreen
 import at.planqton.directcan.ui.screens.txscript.TxScriptManagerScreen
 import at.planqton.directcan.ui.screens.txscript.ScriptEditorScreen
+import at.planqton.directcan.ui.screens.device.DeviceManagerScreen
 import at.planqton.directcan.ui.theme.DirectCanTheme
 import at.planqton.directcan.util.LocaleHelper
 import kotlinx.coroutines.launch
@@ -192,20 +195,79 @@ fun PermissionDeniedDialog(
 @Composable
 fun MainAppContent() {
     val navController = rememberNavController()
+    val context = LocalContext.current
+    val activity = context as? Activity
     val canDataRepository = DirectCanApplication.instance.canDataRepository
-    val usbManager = DirectCanApplication.instance.usbSerialManager
+    val deviceManager = DirectCanApplication.instance.deviceManager
     val aiChatRepository = DirectCanApplication.instance.aiChatRepository
 
-    // Simulation mode state
-    val isSimulationMode by usbManager.isSimulationMode.collectAsState()
+    // Simulation mode state - check if active device is a Simulator
+    val activeDevice by deviceManager.activeDevice.collectAsState()
+    val isSimulationMode = activeDevice?.type == at.planqton.directcan.data.device.DeviceType.SIMULATOR
 
     // Active AI Chat state
     val activeChatId by aiChatRepository.activeChatId.collectAsState()
     val hasActiveChat = activeChatId != null
 
+    // Logging state for exit confirmation
+    val isLogging by canDataRepository.isLogging.collectAsState()
+    var showExitDialog by remember { mutableStateOf(false) }
+
     // Snapshot state
     var pendingSnapshot by remember { mutableStateOf<CanDataRepository.SnapshotData?>(null) }
     var showSnapshotDialog by remember { mutableStateOf(false) }
+
+    // Handle back button when logging is active
+    BackHandler(enabled = isLogging) {
+        showExitDialog = true
+    }
+
+    // Exit confirmation dialog when capturing is active
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            icon = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("Capturing aktiv") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text("Das Capturing läuft noch. Was möchtest du tun?")
+
+                    // Option buttons
+                    Button(
+                        onClick = {
+                            // Continue capturing in background, just minimize app
+                            showExitDialog = false
+                            activity?.moveTaskToBack(true)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Im Hintergrund fortsetzen")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            // Suspend capturing and exit
+                            canDataRepository.setLoggingActive(false)
+                            showExitDialog = false
+                            activity?.moveTaskToBack(true)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Capturing pausieren & verlassen")
+                    }
+
+                    TextButton(
+                        onClick = { showExitDialog = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Abbrechen")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {}
+        )
+    }
 
     Scaffold(
         bottomBar = {
@@ -220,7 +282,13 @@ fun MainAppContent() {
                 },
                 onAiChatClick = {
                     activeChatId?.let { chatId ->
-                        navController.navigate(Screen.AiChat.createRoute(chatId))
+                        navController.navigate(Screen.AiChat.createRoute(chatId)) {
+                            popUpTo(navController.graph.startDestinationId) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 }
             )
@@ -231,7 +299,13 @@ fun MainAppContent() {
             startDestination = Screen.Home.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Home.route) { HomeScreen() }
+            composable(Screen.Home.route) {
+                HomeScreen(
+                    onNavigateToDeviceManager = {
+                        navController.navigate(Screen.DeviceManager.route)
+                    }
+                )
+            }
             composable(Screen.Monitor.route) { MonitorScreen() }
             composable(Screen.Sniffer.route) { SnifferScreen() }
             composable(Screen.Signals.route) { SignalViewerScreen() }
@@ -317,6 +391,11 @@ fun MainAppContent() {
                 val scriptPath = URLDecoder.decode(encodedPath, "UTF-8")
                 ScriptEditorScreen(
                     scriptPath = scriptPath,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.DeviceManager.route) {
+                DeviceManagerScreen(
                     onNavigateBack = { navController.popBackStack() }
                 )
             }

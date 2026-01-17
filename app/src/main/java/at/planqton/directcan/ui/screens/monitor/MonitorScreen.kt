@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import at.planqton.directcan.DirectCanApplication
 import at.planqton.directcan.data.can.CanFrame
 import at.planqton.directcan.data.dbc.DbcFile
+import at.planqton.directcan.data.device.ConnectionState
 import at.planqton.directcan.data.txscript.TxScript
 import at.planqton.directcan.data.txscript.TxScriptFileInfo
 import at.planqton.directcan.data.usb.UsbSerialManager
@@ -65,8 +66,9 @@ fun MonitorScreen() {
     val canDataRepository = DirectCanApplication.instance.canDataRepository
     val txScriptRepository = DirectCanApplication.instance.txScriptRepository
     val txScriptExecutor = DirectCanApplication.instance.txScriptExecutor
+    val deviceManager = DirectCanApplication.instance.deviceManager
 
-    val connectionState by usbManager.connectionState.collectAsState()
+    val connectionState by deviceManager.connectionState.collectAsState()
     val activeDbc by dbcRepository.activeDbcFile.collectAsState()
     val isLogging by canDataRepository.isLogging.collectAsState()
 
@@ -266,7 +268,7 @@ fun MonitorScreen() {
             HorizontalDivider()
 
             // Frame list
-            if (connectionState != UsbSerialManager.ConnectionState.CONNECTED) {
+            if (connectionState != ConnectionState.CONNECTED) {
                 Box(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     contentAlignment = Alignment.Center
@@ -400,7 +402,7 @@ fun MonitorScreen() {
                                         toggleFrameSending(frame.copy(enabled = enabled), enabled)
                                     },
                                     modifier = Modifier.size(36.dp),
-                                    enabled = connectionState == UsbSerialManager.ConnectionState.CONNECTED && frame.canId.isNotBlank()
+                                    enabled = connectionState == ConnectionState.CONNECTED && frame.canId.isNotBlank()
                                 )
 
                                 // Bus
@@ -492,7 +494,7 @@ fun MonitorScreen() {
                                             Toast.makeText(context, "Fehler", Toast.LENGTH_SHORT).show()
                                         }
                                     },
-                                    enabled = connectionState == UsbSerialManager.ConnectionState.CONNECTED && frame.canId.isNotBlank(),
+                                    enabled = connectionState == ConnectionState.CONNECTED && frame.canId.isNotBlank(),
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(Icons.Default.Send, contentDescription = "Einmal senden", modifier = Modifier.size(16.dp))
@@ -632,7 +634,7 @@ fun MonitorScreen() {
                             canDataRepository.setLoggingActive(true)
                         }
                     },
-                    enabled = connectionState == UsbSerialManager.ConnectionState.CONNECTED,
+                    enabled = connectionState == ConnectionState.CONNECTED,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isLogging) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary

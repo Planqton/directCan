@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RemoveRedEye
@@ -48,6 +49,8 @@ sealed class Screen(
     object TxScriptEditor : Screen("txscript_editor/{scriptPath}", "Script Editor", Icons.Default.Edit) {
         fun createRoute(scriptPath: String) = "txscript_editor/${java.net.URLEncoder.encode(scriptPath, "UTF-8")}"
     }
+    // Device Manager screen (like SavvyCAN Connection Settings)
+    object DeviceManager : Screen("device_manager", "Verbindungen", Icons.Default.Link)
 
     companion object {
         // Snapshot button after Settings - no navigation, just action

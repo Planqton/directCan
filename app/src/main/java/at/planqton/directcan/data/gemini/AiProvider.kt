@@ -23,7 +23,8 @@ enum class AiProviderType {
     GEMINI,
     OPENAI,
     ANTHROPIC,
-    OPENROUTER  // Free models available!
+    OPENROUTER,  // Free models available!
+    OPENCODE_ZEN  // Free models without API key!
 }
 
 /**
@@ -550,6 +551,139 @@ class OpenRouterProvider : AiProvider {
 }
 
 /**
+ * OpenCode Zen Provider - FREE models without API key!
+ * Big Pickle, GLM-4.7, Grok Code Fast 1, MiniMax M2.1
+ */
+class OpenCodeZenProvider : AiProvider {
+    override val type = AiProviderType.OPENCODE_ZEN
+    override val name = "OpenCode Zen (Free!)"
+
+    // Free models from OpenCode Zen (no zen/ prefix needed)
+    private val defaultModels = listOf(
+        AiModelInfo("big-pickle", "Big Pickle (200k context)", AiProviderType.OPENCODE_ZEN),
+        AiModelInfo("glm-4.7-free", "GLM-4.7 (Free)", AiProviderType.OPENCODE_ZEN),
+        AiModelInfo("grok-code", "Grok Code", AiProviderType.OPENCODE_ZEN),
+        AiModelInfo("minimax-m2.1-free", "MiniMax M2.1 (Free)", AiProviderType.OPENCODE_ZEN)
+    )
+
+    override suspend fun loadModels(apiKey: String): Result<List<AiModelInfo>> {
+        // Try to load from API, fallback to defaults
+        return try {
+            val url = URL("https://opencode.ai/zen/v1/models")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            if (apiKey.isNotBlank()) {
+                connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            }
+
+            if (connection.responseCode != 200) {
+                return Result.success(defaultModels)
+            }
+
+            val response = connection.inputStream.bufferedReader().readText()
+            val jsonResponse = Json.parseToJsonElement(response).jsonObject
+
+            val models = jsonResponse["data"]?.jsonArray?.mapNotNull { model ->
+                val obj = model.jsonObject
+                val id = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val name = obj["name"]?.jsonPrimitive?.content ?: id
+                AiModelInfo(id, name, AiProviderType.OPENCODE_ZEN)
+            } ?: defaultModels
+
+            Result.success(if (models.isEmpty()) defaultModels else models)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading OpenCode Zen models, using defaults", e)
+            Result.success(defaultModels)
+        }
+    }
+
+    override suspend fun testConnection(apiKey: String, model: String): Result<Boolean> {
+        return try {
+            val result = generateContent(
+                apiKey, model,
+                listOf(AiMessage("user", "Say OK")),
+                null
+            )
+            when (result) {
+                is AiResult.Success -> Result.success(true)
+                is AiResult.Error -> Result.failure(Exception(result.message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun generateContent(
+        apiKey: String,
+        model: String,
+        messages: List<AiMessage>,
+        systemPrompt: String?
+    ): AiResult {
+        return try {
+            val url = URL("https://opencode.ai/zen/v1/chat/completions")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.connectTimeout = 30000
+            connection.readTimeout = 120000
+            // API key is optional for free models
+            if (apiKey.isNotBlank()) {
+                connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            }
+            connection.doOutput = true
+
+            val messagesArray = buildJsonArray {
+                if (systemPrompt != null) {
+                    add(buildJsonObject {
+                        put("role", "system")
+                        put("content", systemPrompt)
+                    })
+                }
+                messages.forEach { msg ->
+                    add(buildJsonObject {
+                        put("role", if (msg.role == "model") "assistant" else msg.role)
+                        put("content", msg.content)
+                    })
+                }
+            }
+
+            val requestBody = buildJsonObject {
+                put("model", model)
+                put("messages", messagesArray)
+                put("max_tokens", 8192)
+            }
+
+            OutputStreamWriter(connection.outputStream).use { writer ->
+                writer.write(requestBody.toString())
+            }
+
+            val responseCode = connection.responseCode
+            if (responseCode != 200) {
+                val errorStream = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
+                return AiResult.Error("API Error: $responseCode - $errorStream", responseCode)
+            }
+
+            val response = connection.inputStream.bufferedReader().readText()
+            val jsonResponse = Json.parseToJsonElement(response).jsonObject
+
+            val message = jsonResponse["choices"]?.jsonArray?.firstOrNull()
+                ?.jsonObject?.get("message")?.jsonObject
+
+            // Try content first, then reasoning_content (for thinking models like Big Pickle)
+            val text = message?.get("content")?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                ?: message?.get("reasoning_content")?.jsonPrimitive?.content
+                ?: return AiResult.Error("No response text")
+
+            AiResult.Success(text)
+        } catch (e: Exception) {
+            Log.e(TAG, "OpenCode Zen generation error", e)
+            AiResult.Error(e.message ?: "Unknown error")
+        }
+    }
+}
+
+/**
  * Factory for creating AI providers
  */
 object AiProviderFactory {
@@ -557,7 +691,8 @@ object AiProviderFactory {
         AiProviderType.GEMINI to GeminiProvider(),
         AiProviderType.OPENAI to OpenAiProvider(),
         AiProviderType.ANTHROPIC to AnthropicProvider(),
-        AiProviderType.OPENROUTER to OpenRouterProvider()
+        AiProviderType.OPENROUTER to OpenRouterProvider(),
+        AiProviderType.OPENCODE_ZEN to OpenCodeZenProvider()
     )
 
     fun getProvider(type: AiProviderType): AiProvider {

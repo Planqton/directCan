@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import at.planqton.directcan.DirectCanApplication
 import at.planqton.directcan.data.can.CanFrame
+import at.planqton.directcan.data.device.ConnectionState
 import at.planqton.directcan.data.usb.UsbSerialManager
 import kotlinx.coroutines.delay
 
@@ -37,7 +38,8 @@ val ColorNotched = Color.Gray
 fun SnifferScreen() {
     val usbManager = DirectCanApplication.instance.usbSerialManager
     val canDataRepository = DirectCanApplication.instance.canDataRepository
-    val connectionState by usbManager.connectionState.collectAsState()
+    val deviceManager = DirectCanApplication.instance.deviceManager
+    val connectionState by deviceManager.connectionState.collectAsState()
     val isLogging by canDataRepository.isLogging.collectAsState()
 
     // Use centrally collected sniffer data from repository
@@ -119,7 +121,7 @@ fun SnifferScreen() {
 
             // Refresh trigger für Recomposition
             key(refreshTrigger) {
-                if (connectionState != UsbSerialManager.ConnectionState.CONNECTED) {
+                if (connectionState != ConnectionState.CONNECTED) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.UsbOff, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -304,7 +306,7 @@ fun SnifferScreen() {
                             canDataRepository.setLoggingActive(true)
                         }
                     },
-                    enabled = connectionState == UsbSerialManager.ConnectionState.CONNECTED,
+                    enabled = connectionState == ConnectionState.CONNECTED,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isLogging) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
