@@ -52,6 +52,9 @@ echo ""
 echo "Building APK..."
 echo "========================================="
 
+# Java 17 setzen
+export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
 # APK bauen
 ./gradlew assembleDebug
 
@@ -88,7 +91,7 @@ git tag "$VERSION"
 
 # Pushen
 echo "Pushe zu GitHub..."
-git push origin main 2>/dev/null || true
+git push origin master 2>/dev/null || git push origin main 2>/dev/null || true
 git push origin "$VERSION"
 
 echo ""
