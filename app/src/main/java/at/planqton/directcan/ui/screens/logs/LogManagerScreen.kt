@@ -29,12 +29,12 @@ fun LogManagerScreen(
     onNavigateToChat: (String) -> Unit = {}
 ) {
     val canDataRepository = DirectCanApplication.instance.canDataRepository
-    val geminiRepository = DirectCanApplication.instance.geminiRepository
+    val aiChatRepository = DirectCanApplication.instance.aiChatRepository
     val logFiles by canDataRepository.logFiles.collectAsState()
 
-    val apiKey by geminiRepository.apiKey.collectAsState(initial = null)
-    val selectedModel by geminiRepository.selectedModel.collectAsState(initial = null)
-    val isGeminiConfigured = !apiKey.isNullOrBlank() && !selectedModel.isNullOrBlank()
+    val apiKey by aiChatRepository.apiKey.collectAsState(initial = null)
+    val selectedModel by aiChatRepository.selectedModel.collectAsState(initial = null)
+    val isAiConfigured = !apiKey.isNullOrBlank() && !selectedModel.isNullOrBlank()
 
     val dbcRepository = DirectCanApplication.instance.dbcRepository
 
@@ -165,7 +165,7 @@ fun LogManagerScreen(
                             dateFormat = dateFormat,
                             onDelete = { deleteConfirmFile = logFile },
                             onView = { selectedFile = logFile },
-                            onAiAnalyze = if (isGeminiConfigured) {
+                            onAiAnalyze = if (isAiConfigured) {
                                 { showAiOptionsDialog = logFile }
                             } else null,
                             isAiLoading = aiLoadingFile == logFile.name
@@ -308,7 +308,7 @@ fun LogManagerScreen(
             text = {
                 Column {
                     Text(
-                        "Snapshot \"${file.name}\" wird an Gemini gesendet.",
+                        "Snapshot \"${file.name}\" wird an AI gesendet.",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(Modifier.height(16.dp))
@@ -327,7 +327,7 @@ fun LogManagerScreen(
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Text(
-                                "Gemini kann Signale direkt in eine DBC speichern",
+                                "AI kann Signale direkt in eine DBC speichern",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -349,13 +349,13 @@ fun LogManagerScreen(
                                     ?: "Keine Daten"
 
                                 val chatId = if (createDbcWithChat) {
-                                    geminiRepository.createChatSessionWithDbc(
+                                    aiChatRepository.createChatSessionWithDbc(
                                         snapshotName = selectedFile.name,
                                         snapshotData = content,
                                         dbcRepository = dbcRepository
                                     )
                                 } else {
-                                    geminiRepository.createChatSession(
+                                    aiChatRepository.createChatSession(
                                         snapshotName = selectedFile.name,
                                         snapshotData = content
                                     )

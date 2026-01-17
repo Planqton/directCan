@@ -43,8 +43,8 @@ import at.planqton.directcan.ui.screens.signals.SignalGraphScreen
 import at.planqton.directcan.ui.screens.signals.SignalViewerScreen
 import at.planqton.directcan.ui.screens.simulator.SimulatorScreen
 import at.planqton.directcan.ui.screens.sniffer.SnifferScreen
-import at.planqton.directcan.ui.screens.gemini.GeminiSettingsScreen
-import at.planqton.directcan.ui.screens.gemini.GeminiChatScreen
+import at.planqton.directcan.ui.screens.gemini.AiSettingsScreen
+import at.planqton.directcan.ui.screens.gemini.AiChatScreen
 import at.planqton.directcan.ui.screens.txscript.TxScriptManagerScreen
 import at.planqton.directcan.ui.screens.txscript.ScriptEditorScreen
 import at.planqton.directcan.ui.theme.DirectCanTheme
@@ -194,13 +194,13 @@ fun MainAppContent() {
     val navController = rememberNavController()
     val canDataRepository = DirectCanApplication.instance.canDataRepository
     val usbManager = DirectCanApplication.instance.usbSerialManager
-    val geminiRepository = DirectCanApplication.instance.geminiRepository
+    val aiChatRepository = DirectCanApplication.instance.aiChatRepository
 
     // Simulation mode state
     val isSimulationMode by usbManager.isSimulationMode.collectAsState()
 
     // Active AI Chat state
-    val activeChatId by geminiRepository.activeChatId.collectAsState()
+    val activeChatId by aiChatRepository.activeChatId.collectAsState()
     val hasActiveChat = activeChatId != null
 
     // Snapshot state
@@ -220,7 +220,7 @@ fun MainAppContent() {
                 },
                 onAiChatClick = {
                     activeChatId?.let { chatId ->
-                        navController.navigate(Screen.GeminiChat.createRoute(chatId))
+                        navController.navigate(Screen.AiChat.createRoute(chatId))
                     }
                 }
             )
@@ -264,8 +264,8 @@ fun MainAppContent() {
                     onNavigateToLogManager = {
                         navController.navigate(Screen.LogManager.route)
                     },
-                    onNavigateToGeminiSettings = {
-                        navController.navigate(Screen.GeminiSettings.route)
+                    onNavigateToAiSettings = {
+                        navController.navigate(Screen.AiSettings.route)
                     },
                     onNavigateToTxScriptManager = {
                         navController.navigate(Screen.TxScriptManager.route)
@@ -276,30 +276,30 @@ fun MainAppContent() {
                 LogManagerScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToChat = { chatId ->
-                        navController.navigate(Screen.GeminiChat.createRoute(chatId))
+                        navController.navigate(Screen.AiChat.createRoute(chatId))
                     }
                 )
             }
             composable(Screen.Simulator.route) {
                 SimulatorScreen()
             }
-            composable(Screen.GeminiSettings.route) {
-                GeminiSettingsScreen(
+            composable(Screen.AiSettings.route) {
+                AiSettingsScreen(
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToChat = { chatId ->
-                        navController.navigate(Screen.GeminiChat.createRoute(chatId))
+                        navController.navigate(Screen.AiChat.createRoute(chatId))
                     }
                 )
             }
-            composable(Screen.GeminiChat.route) { backStackEntry ->
+            composable(Screen.AiChat.route) { backStackEntry ->
                 val encodedChatId = backStackEntry.arguments?.getString("chatId") ?: ""
                 val chatId = URLDecoder.decode(encodedChatId, "UTF-8")
-                GeminiChatScreen(
+                AiChatScreen(
                     chatId = chatId,
                     onNavigateBack = { navController.popBackStack() },
                     onSwitchChat = { newChatId ->
-                        navController.navigate(Screen.GeminiChat.createRoute(newChatId)) {
-                            popUpTo(Screen.GeminiChat.route) { inclusive = true }
+                        navController.navigate(Screen.AiChat.createRoute(newChatId)) {
+                            popUpTo(Screen.AiChat.route) { inclusive = true }
                         }
                     }
                 )
@@ -354,10 +354,10 @@ fun SnapshotDialog(
     onNavigateToLogManager: () -> Unit = {}
 ) {
     val canDataRepository = DirectCanApplication.instance.canDataRepository
-    val geminiRepository = DirectCanApplication.instance.geminiRepository
+    val aiChatRepository = DirectCanApplication.instance.aiChatRepository
     val logFiles by canDataRepository.logFiles.collectAsState()
     val recentDescriptions by canDataRepository.recentDescriptions.collectAsState()
-    val chatSessions by geminiRepository.chatSessions.collectAsState()
+    val chatSessions by aiChatRepository.chatSessions.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -522,7 +522,7 @@ fun SnapshotDialog(
                                     val content = context.contentResolver
                                         .openInputStream(logFile.uri)?.bufferedReader()?.use { it.readText() }
                                         ?: "Keine Daten"
-                                    geminiRepository.updateSnapshotData(relatedChat.id, content)
+                                    aiChatRepository.updateSnapshotData(relatedChat.id, content)
                                 } catch (e: Exception) {
                                     // Ignore errors
                                 }
@@ -649,7 +649,7 @@ fun BottomNavBar(
                             maxLines = 1
                         )
                     },
-                    selected = currentRoute?.startsWith("gemini_chat") == true,
+                    selected = currentRoute?.startsWith("ai_chat") == true,
                     onClick = onAiChatClick,
                     alwaysShowLabel = true
                 )

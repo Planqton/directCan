@@ -1,10 +1,10 @@
-# DirectCAN - Android CAN-Bus Analyzer & Simulator
+# DirectCAN - Android CAN-Bus Analyzer
 
 <p align="center">
-  <img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="128" height="128" alt="DirectCAN Logo">
+  <img src="app/src/main/ic_launcher-playstore.png" width="128" height="128" alt="DirectCAN Logo">
 </p>
 
-**DirectCAN** ist eine professionelle Android-App zur Analyse, Überwachung und Simulation von CAN-Bus-Daten. Die App verbindet sich über USB-Serial mit CAN-Bus-Adaptern und bietet umfangreiche Funktionen wie DBC-Dekodierung, KI-gestützte Analyse, TX-Scripting und Echtzeit-Visualisierung.
+**DirectCAN** ist eine Android-App zur Analyse und Überwachung von CAN-Bus-Daten. Die App verbindet sich über USB-Serial mit CAN-Bus-Adaptern und bietet Funktionen wie DBC-Dekodierung, KI-gestützte Analyse, TX-Scripting und Echtzeit-Visualisierung.
 
 ---
 
@@ -22,7 +22,6 @@
    - [Signal Graph](#signal-graph)
    - [DBC Manager](#dbc-manager)
    - [TX Script Manager](#tx-script-manager)
-   - [Simulator](#simulator)
    - [Gemini AI](#gemini-ai)
    - [Settings](#settings)
 6. [DBC-Format](#dbc-format)
@@ -48,7 +47,7 @@
 - **Gemini AI Integration** - KI-gestützte CAN-Analyse und DBC-Generierung
 - **Signal-Graphen** - Echtzeit-Visualisierung von bis zu 8 Signalen
 - **Snapshot & Logging** - Speichern und Analysieren von CAN-Daten
-- **Fahrzeug-Simulator** - Virtuelle Fahrzeugdaten für Tests
+- **Chat-Export** - AI-Chats als Markdown, Text oder JSON exportieren
 
 ### UI & Bedienung
 - **Material 3 Design** - Moderne Android-UI
@@ -108,7 +107,7 @@ cd directcan
 
 ### 2. DBC laden (optional)
 1. Zu **DBC Manager** navigieren
-2. DBC-Datei importieren oder Simulation-DBC aktivieren
+2. DBC-Datei importieren
 3. Zurück zum Monitor für dekodierte Daten
 
 ### 3. Monitoring starten
@@ -125,7 +124,7 @@ cd directcan
 Der Home-Screen bietet eine Übersicht über den Verbindungsstatus und Quick-Actions.
 
 #### Verbindungs-Karte
-- **Geräte-Dropdown**: Verfügbare USB-Geräte und Simulations-Modus
+- **Geräte-Dropdown**: Verfügbare USB-Geräte
 - **Verbinden/Trennen**: Button zum Herstellen/Beenden der Verbindung
 - **Status-Anzeige**: Verbunden/Getrennt/Verbinde...
 
@@ -333,67 +332,30 @@ Verwaltung und Ausführung von TX Scripts.
 
 ---
 
-### Simulator
+### AI Chat
 
-Virtueller Fahrzeug-Simulator für Tests ohne echtes Fahrzeug.
+KI-gestützte CAN-Analyse mit verschiedenen Anbietern.
 
-#### Engine & Fahrt
-| Parameter | Bereich | CAN-ID |
-|-----------|---------|--------|
-| Motor Status | On/Off | 0x0C9 |
-| RPM | 0-8000 | 0x0C9 |
-| Geschwindigkeit | 0-300 km/h | 0x0B4 |
-| Gas | 0-100% | 0x140 |
-| Bremse | On/Off | 0x1A0 |
-| Gang | P,R,N,1-6 | 0x1F5 |
+#### Unterstützte Provider
+- **OpenRouter** - Viele kostenlose Modelle! (Llama, Gemma, Mistral, etc.)
+- **Google Gemini** - gemini-1.5-flash, gemini-1.5-pro, etc.
+- **OpenAI** - gpt-4o, gpt-4o-mini, gpt-4-turbo, etc.
+- **Anthropic Claude** - claude-3-5-sonnet, claude-3-opus, etc.
 
-#### Temperaturen
-| Parameter | Bereich | CAN-ID |
-|-----------|---------|--------|
-| Motor-Temp | -40 bis 150°C | 0x1D0 |
-| Außen-Temp | -40 bis 60°C | 0x3C3 |
-
-#### Tank & Batterie
-| Parameter | Bereich | CAN-ID |
-|-----------|---------|--------|
-| Tankfüllung | 0-100% | 0x349 |
-| Batterie | 0-20V | 0x520 |
-
-#### Lichter
-| Licht | CAN-ID |
-|-------|--------|
-| Blinker L/R | 0x470 |
-| Nebelscheinwerfer | 0x470 |
-| Scheinwerfer | 0x470 |
-| Fernlicht | 0x470 |
-| Bremslichter | 0x470 |
-| Parklichter | 0x470 |
-
-#### Türen & Karosserie
-| Element | CAN-ID |
-|---------|--------|
-| Fahrertür | 0x2C0 |
-| Beifahrertür | 0x2C0 |
-| Kofferraum | 0x2C0 |
-| Motorhaube | 0x2C0 |
-
-#### Zusatzfunktionen
-- Hupe
-- Tempomat
-- Lenkrad-Tasten (Lautstärke, Track, Voice)
-- VIN-Anzeige
-
----
-
-### Gemini AI
-
-KI-gestützte CAN-Analyse mit Google Gemini.
+#### Kostenlose Modelle (OpenRouter)
+- Llama 3.2 3B
+- Gemma 2 9B
+- Mistral 7B
+- Zephyr 7B
+- OpenChat 7B
+- Nous Capybara 7B
 
 #### Einrichtung
-1. **Settings → Gemini AI** öffnen
-2. API-Key von Google AI Studio eingeben
-3. Modell auswählen (gemini-1.5-flash empfohlen)
-4. Verbindung testen
+1. **Settings → AI Chat** öffnen
+2. Provider auswählen (OpenRouter, Gemini, OpenAI, Claude)
+3. API-Key eingeben (OpenRouter: openrouter.ai - kostenlos!)
+4. Modell auswählen
+5. Verbindung testen
 
 #### Features
 - **Snapshot-Analyse**: CAN-Daten an AI senden
@@ -401,11 +363,26 @@ KI-gestützte CAN-Analyse mit Google Gemini.
 - **Chat-History**: Mehrere Gespräche verwalten
 - **Delta-Mode**: Nur Änderungen senden (Token-sparend)
 
+#### Chat-Export
+Chats können in verschiedenen Formaten exportiert werden:
+- **Markdown** (.md): Formatiert mit Emojis und collapsible Sections
+- **Text** (.txt): Einfaches Textformat
+- **JSON** (.json): Vollständige Daten für Import/Backup
+
+Export-Optionen:
+- **Einzelner Chat**: Share-Button in der Chat-Ansicht
+- **Alle Chats**: "Exportieren"-Button in den Gemini Settings
+- **Teilen**: Direkt an andere Apps senden
+
 #### AI-generierte DBC
 Die AI kann DBC-Befehle generieren:
-```
-CREATE_MESSAGE id=0x123 name="EngineData" length=8
-ADD_SIGNAL message=0x123 name="RPM" startBit=0 length=16 factor=0.25
+```json
+{
+  "commands": [
+    {"type": "addMessage", "id": 513, "name": "EngineData", "length": 8},
+    {"type": "addSignal", "messageId": 513, "name": "RPM", "startBit": 0, "length": 16}
+  ]
+}
 ```
 
 Diese werden automatisch geparst und zur DBC hinzugefügt.
@@ -422,7 +399,6 @@ Zentrale Einstellungen der App.
 | Baudrate | CAN-Bus Geschwindigkeit |
 | Auto-Connect | Automatisch verbinden |
 | Loopback | Test-Modus (Echo) |
-| Simulation ausblenden | Simulator aus Geräteliste entfernen |
 
 #### Erscheinungsbild
 | Einstellung | Beschreibung |
@@ -443,7 +419,7 @@ Zentrale Einstellungen der App.
 #### Künstliche Intelligenz
 | Einstellung | Beschreibung |
 |-------------|-------------|
-| Gemini AI | API-Key und Modell konfigurieren |
+| AI Chat | Provider, API-Key und Modell konfigurieren |
 
 #### Entwickler
 | Einstellung | Beschreibung |
@@ -735,7 +711,7 @@ app/src/main/java/at/planqton/directcan/
 │   ├── can/
 │   │   ├── CanModels.kt        # CanFrame, DecodedFrame
 │   │   ├── CanDataRepository.kt # Zentrale Datenverarbeitung
-│   │   └── CanSimulator.kt     # Fahrzeug-Simulation
+│   │   └── CanSimulator.kt     # Test-Simulation
 │   │
 │   ├── dbc/
 │   │   ├── DbcModels.kt        # DbcFile, DbcMessage, DbcSignal
@@ -786,8 +762,6 @@ app/src/main/java/at/planqton/directcan/
 │   │   │   └── SettingsScreen.kt
 │   │   ├── logs/
 │   │   │   └── LogManagerScreen.kt
-│   │   ├── simulator/
-│   │   │   └── SimulatorScreen.kt
 │   │   ├── gemini/
 │   │   │   ├── GeminiSettingsScreen.kt
 │   │   │   └── GeminiChatScreen.kt
@@ -938,5 +912,5 @@ Siehe LICENSE-Datei für Details.
 ---
 
 <p align="center">
-  Entwickelt mit ❤️ für die CAN-Bus Community
+  Entwickelt für die CAN-Bus Community
 </p>

@@ -6,7 +6,7 @@ import at.planqton.directcan.data.can.CanDataRepository
 import at.planqton.directcan.data.can.CanFrame
 import at.planqton.directcan.data.dbc.DbcFileInfo
 import at.planqton.directcan.data.dbc.DbcRepository
-import at.planqton.directcan.data.gemini.GeminiRepository
+import at.planqton.directcan.data.gemini.AiChatRepository
 import at.planqton.directcan.data.settings.SettingsRepository
 import at.planqton.directcan.data.txscript.TxScriptExecutor
 import at.planqton.directcan.data.txscript.TxScriptRepository
@@ -35,7 +35,7 @@ class DirectCanApplication : Application() {
     lateinit var settingsRepository: SettingsRepository
         private set
 
-    lateinit var geminiRepository: GeminiRepository
+    lateinit var aiChatRepository: AiChatRepository
         private set
 
     lateinit var txScriptRepository: TxScriptRepository
@@ -56,7 +56,7 @@ class DirectCanApplication : Application() {
         usbSerialManager = UsbSerialManager(this)
         dbcRepository = DbcRepository(this)
         canDataRepository = CanDataRepository(this)
-        geminiRepository = GeminiRepository(this)
+        aiChatRepository = AiChatRepository(this)
         txScriptRepository = TxScriptRepository(this)
         txScriptExecutor = TxScriptExecutor(usbSerialManager, canDataRepository)
         Log.d(TAG, "All repositories initialized")
@@ -176,9 +176,10 @@ class DirectCanApplication : Application() {
                 canDataRepository.restoreFrameFilter(savedFilter)
             }
 
-            // Load Gemini chat sessions
-            geminiRepository.loadChatSessions()
-            geminiRepository.initializeModel()
+            // Load AI chat sessions
+            aiChatRepository.loadChatSessions()
+            aiChatRepository.initializeProvider()
+            aiChatRepository.initializeModel()
         } catch (e: Exception) {
             Log.e(TAG, "Error restoring settings", e)
         }

@@ -36,10 +36,10 @@ sealed class Screen(
     object Snapshot : Screen("snapshot", "Snap", Icons.Default.CameraAlt)
     // Simulator screen - only shown when in simulation mode
     object Simulator : Screen("simulator", "Simulator", Icons.Default.DirectionsCar)
-    // Gemini AI screens
-    object GeminiSettings : Screen("gemini_settings", "Gemini", Icons.Default.Psychology)
-    object GeminiChat : Screen("gemini_chat/{chatId}", "AI Chat", Icons.Default.Chat) {
-        fun createRoute(chatId: String) = "gemini_chat/${java.net.URLEncoder.encode(chatId, "UTF-8")}"
+    // AI Chat screens
+    object AiSettings : Screen("ai_settings", "AI", Icons.Default.Psychology)
+    object AiChat : Screen("ai_chat/{chatId}", "AI Chat", Icons.Default.Chat) {
+        fun createRoute(chatId: String) = "ai_chat/${java.net.URLEncoder.encode(chatId, "UTF-8")}"
     }
     // Active AI Chat - for bottom nav when chat is open
     object ActiveAiChat : Screen("active_ai_chat", "AI", Icons.Default.Chat)

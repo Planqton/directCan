@@ -26,7 +26,7 @@ import at.planqton.directcan.util.LocaleHelper
 @Composable
 fun SettingsScreen(
     onNavigateToLogManager: () -> Unit = {},
-    onNavigateToGeminiSettings: () -> Unit = {},
+    onNavigateToAiSettings: () -> Unit = {},
     onNavigateToTxScriptManager: () -> Unit = {}
 ) {
     val usbManager = DirectCanApplication.instance.usbSerialManager
@@ -226,9 +226,9 @@ fun SettingsScreen(
             item {
                 SettingsItem(
                     icon = Icons.Default.Psychology,
-                    title = "Gemini AI",
+                    title = "AI Chat",
                     subtitle = "API-Key und Modell konfigurieren",
-                    onClick = onNavigateToGeminiSettings
+                    onClick = onNavigateToAiSettings
                 )
             }
 
