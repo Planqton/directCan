@@ -3,6 +3,7 @@ package at.planqton.directcan.data.can
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import at.planqton.directcan.data.dbc.DbcFile
 import at.planqton.directcan.data.dbc.DbcMessage
@@ -16,6 +17,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+
+private const val TAG = "CanDataRepository"
 
 /**
  * Global repository for CAN data - used for snapshotting and logging
@@ -94,20 +97,24 @@ class CanDataRepository(private val context: Context) {
     private val fileNameDateFormat = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault())
 
     init {
+        Log.d(TAG, "Initializing CanDataRepository")
         _autoStartLogging.value = prefs.getBoolean("auto_start_logging", false)
+        Log.d(TAG, "Auto-start logging: ${_autoStartLogging.value}")
 
         // Load saved log directory URI
         prefs.getString("log_directory_uri", null)?.let { uriString ->
             try {
                 _logDirectoryUri.value = Uri.parse(uriString)
+                Log.d(TAG, "Loaded log directory URI: $uriString")
             } catch (e: Exception) {
-                // Invalid URI, ignore
+                Log.w(TAG, "Invalid saved log directory URI", e)
             }
         }
 
         // Load recent descriptions
         prefs.getStringSet("recent_descriptions", emptySet())?.let { descriptions ->
             _recentDescriptions.value = descriptions.toList().take(10)
+            Log.d(TAG, "Loaded ${descriptions.size} recent descriptions")
         }
 
         refreshLogFiles()
@@ -135,15 +142,18 @@ class CanDataRepository(private val context: Context) {
     }
 
     fun setAutoStartLogging(enabled: Boolean) {
+        Log.i(TAG, "Auto-start logging set to: $enabled")
         _autoStartLogging.value = enabled
         prefs.edit().putBoolean("auto_start_logging", enabled).apply()
     }
 
     fun setLoggingActive(active: Boolean) {
+        Log.i(TAG, "Logging active set to: $active")
         _isLogging.value = active
     }
 
     fun setOverwriteMode(enabled: Boolean) {
+        Log.d(TAG, "Overwrite mode set to: $enabled")
         _overwriteMode = enabled
     }
 
@@ -151,9 +161,10 @@ class CanDataRepository(private val context: Context) {
      * Set the active DBC file for signal decoding
      */
     fun setActiveDbcFile(dbcFile: DbcFile?) {
+        Log.i(TAG, "Active DBC file set: ${dbcFile?.let { "${it.messages.size} messages" } ?: "none"}")
         _activeDbcFile = dbcFile
         if (dbcFile == null) {
-            // Clear signal values when DBC is unloaded
+            Log.d(TAG, "Clearing signal values (DBC unloaded)")
             signalValuesMap.clear()
             _signalValues.value = emptyMap()
         }
@@ -177,6 +188,7 @@ class CanDataRepository(private val context: Context) {
      * Clear signal history
      */
     fun clearSignalHistory() {
+        Log.d(TAG, "Clearing signal history")
         signalHistoryBuffer.clear()
         signalValuesMap.clear()
         _signalValues.value = emptyMap()
@@ -184,12 +196,14 @@ class CanDataRepository(private val context: Context) {
 
     // Filter methods
     fun setIdFilterEnabled(id: Long, enabled: Boolean) {
+        Log.v(TAG, "Filter for ID 0x${id.toString(16).uppercase()}: $enabled")
         val current = _frameFilter.value.toMutableMap()
         current[id] = enabled
         _frameFilter.value = current
     }
 
     fun setAllFiltersEnabled(enabled: Boolean) {
+        Log.d(TAG, "Setting all ${_knownIds.value.size} filters to: $enabled")
         val current = _frameFilter.value.toMutableMap()
         _knownIds.value.forEach { id ->
             current[id] = enabled
@@ -204,6 +218,7 @@ class CanDataRepository(private val context: Context) {
 
     fun clearFiltersOnClear(keepFilters: Boolean) {
         if (!keepFilters) {
+            Log.d(TAG, "Clearing all filters and known IDs")
             _frameFilter.value = emptyMap()
             _knownIds.value = emptySet()
         }
@@ -213,6 +228,7 @@ class CanDataRepository(private val context: Context) {
      * Restore frame filter from saved settings
      */
     fun restoreFrameFilter(filter: Map<Long, Boolean>) {
+        Log.d(TAG, "Restoring frame filter: ${filter.size} entries")
         _frameFilter.value = filter
         _knownIds.value = filter.keys
     }
@@ -350,6 +366,7 @@ class CanDataRepository(private val context: Context) {
     }
 
     fun clearMonitorFrames() {
+        Log.d(TAG, "Clearing monitor frames (was ${monitorFrameBuffer.size} frames)")
         monitorFrameBuffer.clear()
         monitorIdIndex.clear()
         _monitorFrames.value = emptyList()
@@ -357,6 +374,7 @@ class CanDataRepository(private val context: Context) {
     }
 
     fun clearSnifferFrames() {
+        Log.d(TAG, "Clearing sniffer frames (was ${snifferDataMap.size} IDs)")
         snifferDataMap.clear()
         _snifferFrames.value = emptyMap()
     }
@@ -389,14 +407,16 @@ class CanDataRepository(private val context: Context) {
      * Set the log directory URI (from folder picker)
      */
     fun setLogDirectoryUri(uri: Uri) {
+        Log.i(TAG, "Setting log directory URI: $uri")
         // Take persistable permission
         try {
             context.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
+            Log.d(TAG, "Persistable permission taken for log directory")
         } catch (e: Exception) {
-            // Permission might already be taken
+            Log.w(TAG, "Could not take persistable permission (may already be held)", e)
         }
 
         _logDirectoryUri.value = uri
@@ -408,6 +428,7 @@ class CanDataRepository(private val context: Context) {
      * Clear the log directory setting
      */
     fun clearLogDirectoryUri() {
+        Log.i(TAG, "Clearing log directory URI")
         _logDirectoryUri.value = null
         prefs.edit().remove("log_directory_uri").apply()
         _logFiles.value = emptyList()
@@ -453,19 +474,17 @@ class CanDataRepository(private val context: Context) {
         scope.launch {
             val uri = _logDirectoryUri.value
             if (uri == null) {
+                Log.v(TAG, "No log directory configured, skipping refresh")
                 _logFiles.value = emptyList()
                 return@launch
             }
 
             try {
                 val docFile = DocumentFile.fromTreeUri(context, uri)
-                android.util.Log.d("CanDataRepository", "Refreshing log files from: ${docFile?.uri}")
+                Log.d(TAG, "Refreshing log files from: ${docFile?.uri}")
 
                 val allFiles = docFile?.listFiles() ?: emptyArray()
-                android.util.Log.d("CanDataRepository", "Found ${allFiles.size} files total")
-                allFiles.forEach { f ->
-                    android.util.Log.d("CanDataRepository", "  File: ${f.name}, isFile: ${f.isFile}")
-                }
+                Log.v(TAG, "Found ${allFiles.size} files total in log directory")
 
                 val files = allFiles
                     .filter { it.isFile && (it.name?.contains(".log") == true) }
@@ -486,10 +505,10 @@ class CanDataRepository(private val context: Context) {
                     }
                     .sortedByDescending { it.lastModified }
 
-                android.util.Log.d("CanDataRepository", "Filtered to ${files.size} log files")
+                Log.d(TAG, "Found ${files.size} log files")
                 _logFiles.value = files
             } catch (e: Exception) {
-                android.util.Log.e("CanDataRepository", "Error refreshing log files", e)
+                Log.e(TAG, "Error refreshing log files", e)
                 _logFiles.value = emptyList()
             }
         }
@@ -509,7 +528,11 @@ class CanDataRepository(private val context: Context) {
      * Create a new log file
      */
     fun createLogFile(name: String): LogFileInfo? {
-        val uri = _logDirectoryUri.value ?: return null
+        Log.i(TAG, "Creating log file: $name")
+        val uri = _logDirectoryUri.value ?: run {
+            Log.w(TAG, "Cannot create log file - no directory configured")
+            return null
+        }
 
         return try {
             val docFile = DocumentFile.fromTreeUri(context, uri) ?: return null
@@ -519,11 +542,15 @@ class CanDataRepository(private val context: Context) {
             val existingLog = docFile.findFile("$baseName.log")
             val existingTxt = docFile.findFile("$baseName.log.txt")
             if (existingLog != null || existingTxt != null) {
-                return null // File already exists
+                Log.w(TAG, "Log file already exists: $baseName")
+                return null
             }
 
             // Use application/octet-stream to prevent Android from adding .txt extension
-            val newFile = docFile.createFile("application/octet-stream", "$baseName.log") ?: return null
+            val newFile = docFile.createFile("application/octet-stream", "$baseName.log") ?: run {
+                Log.e(TAG, "Failed to create log file")
+                return null
+            }
 
             // Write initial content
             context.contentResolver.openOutputStream(newFile.uri)?.bufferedWriter()?.use { writer ->
@@ -532,9 +559,10 @@ class CanDataRepository(private val context: Context) {
             }
 
             refreshLogFiles()
+            Log.i(TAG, "Log file created successfully: $baseName")
             LogFileInfo(baseName, newFile, newFile.uri, newFile.length(), newFile.lastModified(), 0)
         } catch (e: Exception) {
-            android.util.Log.e("CanDataRepository", "Error creating log file", e)
+            Log.e(TAG, "Error creating log file", e)
             null
         }
     }
@@ -543,11 +571,18 @@ class CanDataRepository(private val context: Context) {
      * Delete a log file
      */
     fun deleteLogFile(logFile: LogFileInfo): Boolean {
+        Log.i(TAG, "Deleting log file: ${logFile.name}")
         return try {
-            logFile.documentFile?.delete() ?: false
+            val deleted = logFile.documentFile?.delete() ?: false
+            if (deleted) {
+                Log.i(TAG, "Log file deleted: ${logFile.name}")
+            } else {
+                Log.w(TAG, "Failed to delete log file: ${logFile.name}")
+            }
             refreshLogFiles()
-            true
+            deleted
         } catch (e: Exception) {
+            Log.e(TAG, "Error deleting log file", e)
             false
         }
     }
@@ -559,6 +594,7 @@ class CanDataRepository(private val context: Context) {
     fun captureSnapshot(): SnapshotData {
         val frames = _currentFrames.value.toMap()
         val timestamp = System.currentTimeMillis()
+        Log.i(TAG, "Snapshot captured: ${frames.size} frames")
         return SnapshotData(frames, timestamp)
     }
 
@@ -566,6 +602,7 @@ class CanDataRepository(private val context: Context) {
      * Save a previously captured snapshot to log file
      */
     fun saveSnapshot(snapshot: SnapshotData, logFile: LogFileInfo, description: String): Boolean {
+        Log.i(TAG, "Saving snapshot '$description' to ${logFile.name} (${snapshot.frames.size} frames)")
         return try {
             val timestamp = dateFormat.format(Date(snapshot.captureTime))
 
@@ -602,8 +639,10 @@ class CanDataRepository(private val context: Context) {
             }
 
             refreshLogFiles()
+            Log.i(TAG, "Snapshot saved successfully")
             true
         } catch (e: Exception) {
+            Log.e(TAG, "Error saving snapshot", e)
             false
         }
     }

@@ -1,0 +1,127 @@
+VERSION ""
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_REL_
+	BA_SGTYPE_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: Simulator ECU BCM Cluster
+
+BO_ 201 EngineRPM: 8 ECU
+ SG_ RPM : 0|16@1+ (0.25,0) [0|16383.75] "rpm" Cluster
+ SG_ EngineRunning : 16|1@1+ (1,0) [0|1] "" Cluster
+
+BO_ 180 VehicleSpeed: 8 ECU
+ SG_ Speed : 8|16@1+ (0.01,0) [0|655.35] "km/h" Cluster
+ SG_ SpeedValid : 0|1@1+ (1,0) [0|1] "" Cluster
+
+BO_ 320 ThrottlePosition: 8 ECU
+ SG_ Throttle : 0|8@1+ (0.392157,0) [0|100] "%" ECU
+
+BO_ 464 EngineTemperature: 8 ECU
+ SG_ CoolantTemp : 0|8@1+ (1,-40) [-40|215] "C" Cluster
+ SG_ TempWarning : 8|1@1+ (1,0) [0|1] "" Cluster
+
+BO_ 963 OutsideTemperature: 8 BCM
+ SG_ AmbientTemp : 0|8@1+ (0.5,-40) [-40|87.5] "C" Cluster
+
+BO_ 841 FuelLevel: 8 BCM
+ SG_ FuelPercent : 0|8@1+ (0.392157,0) [0|100] "%" Cluster
+ SG_ FuelLow : 8|1@1+ (1,0) [0|1] "" Cluster
+
+BO_ 1136 LightsStatus: 8 BCM
+ SG_ LeftBlinker : 0|1@1+ (1,0) [0|1] "" Cluster
+ SG_ RightBlinker : 1|1@1+ (1,0) [0|1] "" Cluster
+ SG_ Headlights : 2|1@1+ (1,0) [0|1] "" Cluster
+ SG_ HighBeam : 3|1@1+ (1,0) [0|1] "" Cluster
+ SG_ HazardLights : 4|1@1+ (1,0) [0|1] "" Cluster
+ SG_ FogLights : 5|1@1+ (1,0) [0|1] "" Cluster
+ SG_ ParkingLights : 6|1@1+ (1,0) [0|1] "" Cluster
+
+BO_ 416 BrakeStatus: 8 ECU
+ SG_ BrakePedal : 0|1@1+ (1,0) [0|1] "" Cluster
+ SG_ BrakeForce : 8|8@1+ (0.392157,0) [0|100] "%" Cluster
+ SG_ ABSActive : 16|1@1+ (1,0) [0|1] "" Cluster
+
+BO_ 704 DoorsStatus: 8 BCM
+ SG_ DriverDoor : 0|1@1+ (1,0) [0|1] "" Cluster
+ SG_ PassengerDoor : 1|1@1+ (1,0) [0|1] "" Cluster
+ SG_ RearLeftDoor : 2|1@1+ (1,0) [0|1] "" Cluster
+ SG_ RearRightDoor : 3|1@1+ (1,0) [0|1] "" Cluster
+ SG_ Trunk : 4|1@1+ (1,0) [0|1] "" Cluster
+ SG_ Hood : 5|1@1+ (1,0) [0|1] "" Cluster
+
+BO_ 501 GearStatus: 8 ECU
+ SG_ CurrentGear : 0|4@1+ (1,0) [0|8] "" Cluster
+ SG_ TargetGear : 4|4@1+ (1,0) [0|8] "" Cluster
+ SG_ GearMode : 8|3@1+ (1,0) [0|7] "" Cluster
+
+BO_ 198 SteeringAngle: 8 ECU
+ SG_ SteeringAngle : 0|16@1+ (0.1,-720) [-720|720] "deg" Cluster
+ SG_ SteeringSpeed : 16|8@1+ (4,0) [0|1020] "deg/s" Cluster
+
+BO_ 1312 BatteryVoltage: 8 BCM
+ SG_ Voltage : 0|16@1+ (0.1,0) [0|25.5] "V" Cluster
+ SG_ BatteryLow : 16|1@1+ (1,0) [0|1] "" Cluster
+
+BO_ 1456 Odometer: 8 Cluster
+ SG_ TotalKm : 0|24@1+ (0.1,0) [0|1677721.5] "km" Cluster
+ SG_ TripKm : 24|16@1+ (0.1,0) [0|6553.5] "km" Cluster
+
+CM_ BO_ 201 "Engine RPM and status from ECU";
+CM_ BO_ 180 "Vehicle speed from wheel sensors";
+CM_ BO_ 320 "Throttle pedal position";
+CM_ BO_ 464 "Engine coolant temperature";
+CM_ BO_ 963 "Outside ambient temperature";
+CM_ BO_ 841 "Fuel tank level";
+CM_ BO_ 1136 "All exterior lights status";
+CM_ BO_ 416 "Brake system status";
+CM_ BO_ 704 "Door and trunk status";
+CM_ BO_ 501 "Transmission gear information";
+CM_ BO_ 198 "Steering wheel angle and speed";
+CM_ BO_ 1312 "Battery voltage monitoring";
+CM_ BO_ 1456 "Odometer and trip counter";
+
+CM_ SG_ 201 RPM "Engine revolutions per minute, factor 0.25";
+CM_ SG_ 180 Speed "Vehicle speed in km/h with 0.01 resolution";
+CM_ SG_ 464 CoolantTemp "Engine coolant temperature, offset -40";
+CM_ SG_ 963 AmbientTemp "Outside temperature, offset -40, factor 0.5";
+CM_ SG_ 841 FuelPercent "Fuel tank level as percentage";
+CM_ SG_ 1456 TotalKm "Total odometer reading in km";
+
+VAL_ 501 CurrentGear 0 "P" 1 "1" 2 "2" 3 "3" 4 "4" 5 "5" 6 "6" 7 "R" 8 "N" ;
+VAL_ 501 GearMode 0 "Park" 1 "Reverse" 2 "Neutral" 3 "Drive" 4 "Sport" 5 "Manual" ;
+VAL_ 1136 LeftBlinker 0 "Off" 1 "On" ;
+VAL_ 1136 RightBlinker 0 "Off" 1 "On" ;
+VAL_ 1136 Headlights 0 "Off" 1 "On" ;
+VAL_ 1136 HighBeam 0 "Off" 1 "On" ;
+VAL_ 416 BrakePedal 0 "Released" 1 "Pressed" ;
+VAL_ 416 ABSActive 0 "Inactive" 1 "Active" ;
+VAL_ 704 DriverDoor 0 "Closed" 1 "Open" ;
+VAL_ 704 PassengerDoor 0 "Closed" 1 "Open" ;
+VAL_ 704 Trunk 0 "Closed" 1 "Open" ;
+VAL_ 704 Hood 0 "Closed" 1 "Open" ;
+

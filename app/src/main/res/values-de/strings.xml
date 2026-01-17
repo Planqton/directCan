@@ -1,0 +1,290 @@
+<resources>
+    <string name="app_name">DirectCAN</string>
+
+    <!-- Common -->
+    <string name="ok">OK</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="save">Speichern</string>
+    <string name="delete">Löschen</string>
+    <string name="close">Schließen</string>
+    <string name="back">Zurück</string>
+    <string name="refresh">Aktualisieren</string>
+    <string name="error">Fehler</string>
+    <string name="loading">Laden…</string>
+    <string name="yes">Ja</string>
+    <string name="no">Nein</string>
+    <string name="create">Erstellen</string>
+    <string name="edit">Bearbeiten</string>
+    <string name="details">Details</string>
+    <string name="export">Exportieren</string>
+    <string name="import_text">Importieren</string>
+    <string name="send">Senden</string>
+    <string name="discard">Verwerfen</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_monitor">Monitor</string>
+    <string name="nav_sniffer">Sniffer</string>
+    <string name="nav_signals">Signale</string>
+    <string name="nav_graph">Graph</string>
+    <string name="nav_dbc">DBC</string>
+    <string name="nav_settings">Einstellungen</string>
+    <string name="nav_snapshot">Snap</string>
+    <string name="nav_simulator">Simulator</string>
+    <string name="nav_ai">KI</string>
+
+    <!-- Home Screen -->
+    <string name="connection_status">Verbindungsstatus</string>
+    <string name="connected">Verbunden</string>
+    <string name="connecting">Verbinde…</string>
+    <string name="disconnected">Nicht verbunden</string>
+    <string name="connection_error">Fehler</string>
+    <string name="connect">Verbinden</string>
+    <string name="disconnect">Trennen</string>
+    <string name="auto_start_logging">Loggen direkt starten</string>
+    <string name="logging_active">Logging aktiv</string>
+    <string name="active_dbc">Aktive DBC</string>
+    <string name="no_dbc_loaded">Keine DBC geladen</string>
+    <string name="debug">Debug</string>
+    <string name="status">Status</string>
+    <string name="info">Info</string>
+    <string name="reset_stats">Statistiken zurücksetzen</string>
+    <string name="reset_stats_desc">Filter, aktive DBC und alle Daten löschen</string>
+    <string name="reset_all_data">Alle Daten zurücksetzen?</string>
+    <string name="reset_all_data_desc">Dies löscht alle Filter, die aktive DBC-Zuordnung, alle gespeicherten Einstellungen und alle erfassten Daten. Diese Aktion kann nicht rückgängig gemacht werden.</string>
+    <string name="reset">Zurücksetzen</string>
+    <string name="quick_access">Schnellzugriff</string>
+    <string name="can_monitor">CAN Monitor</string>
+    <string name="read_dtcs">DTCs lesen</string>
+    <string name="available_devices">Verfügbare Geräte</string>
+    <string name="select_device">Gerät auswählen</string>
+    <string name="no_devices_found">Keine Geräte gefunden</string>
+    <string name="simulation_mode">Simulations-Modus</string>
+    <string name="usb_permission_denied">USB-Berechtigung verweigert</string>
+
+    <!-- Monitor Screen -->
+    <string name="frames">Frames</string>
+    <string name="fps">fps</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Fortsetzen</string>
+    <string name="clear">Löschen</string>
+    <string name="filter">Filter</string>
+    <string name="overwrite_mode">Überschreiben</string>
+    <string name="scroll_mode">Scrollen</string>
+    <string name="frame_id">ID</string>
+    <string name="frame_data">Daten</string>
+    <string name="frame_time">Zeit</string>
+    <string name="frame_length">Länge</string>
+    <string name="frame_ascii">ASCII</string>
+    <string name="frame_decoded">Dekodiert</string>
+    <string name="extended">Ext</string>
+    <string name="rtr">RTR</string>
+    <string name="direction">Richtung</string>
+    <string name="bus">Bus</string>
+    <string name="select_all">Alle auswählen</string>
+    <string name="deselect_all">Alle abwählen</string>
+    <string name="filter_frames">Frames filtern</string>
+    <string name="no_frames">Keine Frames erfasst</string>
+    <string name="start_logging_hint">Verbinde dich mit einem Gerät und starte das Logging um CAN-Frames zu sehen</string>
+
+    <!-- Sniffer Screen -->
+    <string name="unique_ids">Eindeutige IDs</string>
+    <string name="total_frames">Gesamt Frames</string>
+    <string name="byte_view">Bytes</string>
+    <string name="bit_view">Bits</string>
+    <string name="notch_bits">Bits markieren</string>
+    <string name="clear_notched">Markierungen löschen</string>
+    <string name="updates">Aktualisierungen</string>
+
+    <!-- Signal Viewer -->
+    <string name="signal_viewer">Signal-Anzeige</string>
+    <string name="no_signals">Keine Signale</string>
+    <string name="no_dbc_hint">Lade eine DBC-Datei um dekodierte Signale zu sehen</string>
+    <string name="search_signals">Signale suchen…</string>
+    <string name="message">Nachricht</string>
+    <string name="signal">Signal</string>
+    <string name="value">Wert</string>
+    <string name="unit">Einheit</string>
+    <string name="last_update">Letzte Aktualisierung</string>
+
+    <!-- Signal Graph -->
+    <string name="signal_graph">Signal-Graph</string>
+    <string name="select_signals">Signale auswählen</string>
+    <string name="no_data">Keine Daten</string>
+    <string name="clear_history">Verlauf löschen</string>
+    <string name="auto_scroll">Auto-Scroll</string>
+    <string name="time_window">Zeitfenster</string>
+    <string name="seconds">Sekunden</string>
+
+    <!-- DBC Manager -->
+    <string name="dbc_manager">DBC Manager</string>
+    <string name="import_dbc">DBC importieren</string>
+    <string name="no_dbc_files">Keine DBC-Dateien vorhanden</string>
+    <string name="import_dbc_hint">Importiere eine DBC-Datei um CAN-Messages zu dekodieren</string>
+    <string name="available_dbc_files">Verfügbare DBC-Dateien</string>
+    <string name="active">Aktiv</string>
+    <string name="deactivate">Deaktivieren</string>
+    <string name="delete_dbc">DBC löschen?</string>
+    <string name="delete_dbc_confirm">Möchtest du \"%1$s\" wirklich löschen?</string>
+    <string name="messages">Nachrichten</string>
+    <string name="signals">Signale</string>
+    <string name="nodes">Knoten</string>
+    <string name="bytes">Bytes</string>
+    <string name="storage_location">Speicherort</string>
+    <string name="new_dbc">Neue DBC</string>
+    <string name="dbc_name">DBC-Name</string>
+
+    <!-- DBC Editor -->
+    <string name="dbc_editor">DBC Editor</string>
+    <string name="add_message">Nachricht hinzufügen</string>
+    <string name="edit_message">Nachricht bearbeiten</string>
+    <string name="delete_message">Nachricht löschen</string>
+    <string name="add_signal">Signal hinzufügen</string>
+    <string name="edit_signal">Signal bearbeiten</string>
+    <string name="delete_signal">Signal löschen</string>
+    <string name="message_id">Nachrichten-ID</string>
+    <string name="message_name">Nachrichtenname</string>
+    <string name="message_length">Länge</string>
+    <string name="signal_name">Signalname</string>
+    <string name="start_bit">Startbit</string>
+    <string name="bit_length">Bitlänge</string>
+    <string name="byte_order">Byte-Reihenfolge</string>
+    <string name="little_endian">Little Endian</string>
+    <string name="big_endian">Big Endian</string>
+    <string name="factor">Faktor</string>
+    <string name="offset">Offset</string>
+    <string name="minimum">Minimum</string>
+    <string name="maximum">Maximum</string>
+    <string name="signed">Vorzeichenbehaftet</string>
+    <string name="unsigned">Vorzeichenlos</string>
+
+    <!-- Settings -->
+    <string name="settings">Einstellungen</string>
+    <string name="language">Sprache</string>
+    <string name="language_system">Systemstandard</string>
+    <string name="language_en">Englisch</string>
+    <string name="language_de">Deutsch</string>
+    <string name="appearance">Darstellung</string>
+    <string name="theme">Design</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Hell</string>
+    <string name="theme_dark">Dunkel</string>
+    <string name="can_settings">CAN-Einstellungen</string>
+    <string name="baudrate">Baudrate</string>
+    <string name="log_management">Log-Verwaltung</string>
+    <string name="log_directory">Log-Verzeichnis</string>
+    <string name="select_folder">Ordner auswählen</string>
+    <string name="ai_settings">KI-Einstellungen</string>
+    <string name="gemini_ai">Gemini KI</string>
+    <string name="configure_api">API-Key und Modell konfigurieren</string>
+    <string name="about">Über</string>
+    <string name="version">Version</string>
+    <string name="help">Hilfe</string>
+
+    <!-- Log Manager -->
+    <string name="log_manager">Log Manager</string>
+    <string name="new_log">Neues Log</string>
+    <string name="create_new_log">Neues Log erstellen</string>
+    <string name="log_name">Log-Name</string>
+    <string name="enter_log_name">Geben Sie einen Namen für das Log ein:</string>
+    <string name="no_log_files">Keine Log-Dateien vorhanden</string>
+    <string name="create_log_hint">Erstellen Sie eine neue Log-Datei um Snapshots zu speichern</string>
+    <string name="delete_log">Log löschen?</string>
+    <string name="delete_log_confirm">Möchten Sie das Log \"%1$s\" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.</string>
+    <string name="snapshots">Snapshots</string>
+    <string name="ai_analysis">KI-Analyse</string>
+
+    <!-- Snapshot Dialog -->
+    <string name="snapshot_saved">Snapshot gespeichert!</string>
+    <string name="save_to_log">In welches Log speichern?</string>
+    <string name="create_new_log_option">+ Neues Log erstellen</string>
+    <string name="select_log">Log auswählen…</string>
+    <string name="description">Beschreibung</string>
+    <string name="description_hint">z.B. Wassertemperatur 10°C</string>
+    <string name="unnamed_snapshot">Unbenannter Snapshot</string>
+
+    <!-- Gemini Settings -->
+    <string name="api_configuration">API Konfiguration</string>
+    <string name="api_key">API Key</string>
+    <string name="not_configured">Nicht konfiguriert</string>
+    <string name="model">Modell</string>
+    <string name="not_selected">Nicht ausgewählt</string>
+    <string name="delta_compression">Delta-Komprimierung</string>
+    <string name="delta_compression_desc">Nur geänderte Frames zwischen Snapshots senden</string>
+    <string name="test_connection">Testen</string>
+    <string name="test_chat">Test-Chat</string>
+    <string name="connection_successful">Verbindung erfolgreich!</string>
+    <string name="connection_failed">Verbindung fehlgeschlagen</string>
+    <string name="chat_history">Chat-Verlauf</string>
+    <string name="delete_chat">Chat löschen?</string>
+    <string name="delete_chat_confirm">Möchten Sie diesen Chat wirklich löschen?</string>
+    <string name="api_key_hint">Den API Key erhalten Sie unter ai.google.dev</string>
+    <string name="enter_api_key">API Key eingeben</string>
+    <string name="select_model">Modell auswählen</string>
+    <string name="info_gemini">Um die KI-Analyse zu nutzen, benötigen Sie einen Google Gemini API-Key. Diesen erhalten Sie unter ai.google.dev.</string>
+
+    <!-- Gemini Chat -->
+    <string name="ai_chat">KI Chat</string>
+    <string name="snapshot_loaded">Snapshot geladen</string>
+    <string name="snapshot_loaded_desc">Ich habe den Snapshot \"%1$s\" geladen. Stelle mir Fragen zur Analyse der CAN-Bus Daten.</string>
+    <string name="chat_not_found">Chat nicht gefunden</string>
+    <string name="enter_message">Nachricht eingeben…</string>
+    <string name="gemini_thinking">Gemini denkt…</string>
+    <string name="snapshot_data_title">Snapshot-Daten für Gemini</string>
+    <string name="delta_compressed">Delta-Komprimiert</string>
+    <string name="original">Original</string>
+    <string name="n_messages">%1$d Nachrichten</string>
+
+    <!-- Simulator -->
+    <string name="simulator">Simulator</string>
+    <string name="engine_speed">Motor &amp; Geschwindigkeit</string>
+    <string name="engine_running">Motor läuft</string>
+    <string name="rpm">Drehzahl</string>
+    <string name="speed">Geschwindigkeit</string>
+    <string name="throttle">Gas</string>
+    <string name="brake">Bremse</string>
+    <string name="gear">Gang</string>
+    <string name="temperatures">Temperaturen</string>
+    <string name="engine_temp">Motortemperatur</string>
+    <string name="outside_temp">Außentemperatur</string>
+    <string name="fuel_battery">Tank &amp; Batterie</string>
+    <string name="fuel_level">Tankfüllung</string>
+    <string name="battery_voltage">Batteriespannung</string>
+    <string name="steering">Lenkung</string>
+    <string name="steering_angle">Lenkwinkel</string>
+    <string name="lights">Beleuchtung</string>
+    <string name="left_blinker">Links</string>
+    <string name="right_blinker">Rechts</string>
+    <string name="hazard_lights">Warnblinker</string>
+    <string name="low_beam">Abblend</string>
+    <string name="high_beam">Fernlicht</string>
+    <string name="fog_lights">Nebel</string>
+    <string name="doors">Türen</string>
+    <string name="driver_door">Fahrer</string>
+    <string name="passenger_door">Beifahrer</string>
+    <string name="trunk">Kofferraum</string>
+    <string name="hood">Motorhaube</string>
+    <string name="steering_buttons">Lenkradtasten</string>
+    <string name="horn">Hupe</string>
+    <string name="cruise_control">Tempomat</string>
+    <string name="media_control">Mediensteuerung</string>
+    <string name="vehicle_data">Fahrzeugdaten</string>
+    <string name="vin">VIN (Fahrgestellnummer)</string>
+    <string name="odometer">Kilometerstand</string>
+    <string name="new_value">Neuer Wert (km)</string>
+    <string name="set">Setzen</string>
+
+    <!-- Errors -->
+    <string name="error_loading_models">Fehler beim Laden der Modelle: %1$s</string>
+    <string name="error_no_model">Kein Modell konfiguriert</string>
+    <string name="error_invalid_api_key">Ungültiger API-Key</string>
+    <string name="error_network">Netzwerkfehler: Keine Internetverbindung</string>
+    <string name="error_server">Server-Fehler: %1$s</string>
+    <string name="error_prompt_blocked">Anfrage wurde blockiert (Safety Filter)</string>
+    <string name="error_format">Antwort-Format-Fehler. Versuche ein anderes Modell (z.B. gemini-1.5-flash)</string>
+    <string name="error_connection_test">Verbindungstest fehlgeschlagen: %1$s</string>
+    <string name="error_simulation">Simulation fehlgeschlagen: %1$s</string>
+    <string name="error_import">Import fehlgeschlagen: %1$s</string>
+    <string name="error_create_log">Fehler beim Erstellen der Log-Datei</string>
+    <string name="error_read_file">Fehler beim Lesen: %1$s</string>
+</resources>

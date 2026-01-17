@@ -34,6 +34,7 @@ class DbcRepository(private val context: Context) {
     val activeDbc: StateFlow<DbcFileInfo?> = _activeDbc.asStateFlow()
 
     init {
+        Log.d(TAG, "Initializing DbcRepository, dir: ${dbcDir.absolutePath}")
         refreshDbcList()
     }
 
@@ -53,6 +54,7 @@ class DbcRepository(private val context: Context) {
             ?.sortedByDescending { it.lastModified }
             ?: emptyList()
 
+        Log.d(TAG, "Refreshed DBC list: ${files.size} files")
         _dbcFiles.value = files
     }
 
@@ -146,30 +148,46 @@ class DbcRepository(private val context: Context) {
 
     suspend fun loadDbc(info: DbcFileInfo): Result<DbcFile> = withContext(Dispatchers.IO) {
         try {
+            Log.i(TAG, "Loading DBC: ${info.name}")
             val jsonFile = File(info.path.replace(".dbc", ".json"))
 
             val dbcFile = if (jsonFile.exists()) {
                 // Load from cached JSON (faster)
+                Log.d(TAG, "Loading from cached JSON")
                 json.decodeFromString<DbcFile>(jsonFile.readText())
             } else {
                 // Parse DBC
+                Log.d(TAG, "Parsing DBC file")
                 val parser = DbcParser()
                 val file = File(info.path)
                 parser.parse(file.readText())
             }
 
+            Log.i(TAG, "DBC loaded: ${dbcFile.messages.size} messages")
             _activeDbcFile.value = dbcFile
             _activeDbc.value = info.copy(isActive = true)
             refreshDbcList()
 
             Result.success(dbcFile)
         } catch (e: Exception) {
+            Log.e(TAG, "Error loading DBC", e)
             Result.failure(e)
         }
     }
 
+    /**
+     * Deactivate the currently active DBC (without deleting it)
+     */
+    fun deactivateDbc() {
+        Log.i(TAG, "Deactivating DBC")
+        _activeDbc.value = null
+        _activeDbcFile.value = null
+        refreshDbcList()
+    }
+
     suspend fun exportDbc(info: DbcFileInfo, targetUri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            Log.i(TAG, "Exporting DBC: ${info.name} to $targetUri")
             val sourceFile = File(info.path)
             val content = sourceFile.readText()
 
@@ -177,31 +195,38 @@ class DbcRepository(private val context: Context) {
                 output.write(content.toByteArray())
             } ?: return@withContext Result.failure(Exception("Cannot write to target"))
 
+            Log.i(TAG, "DBC exported successfully")
             Result.success(Unit)
         } catch (e: Exception) {
+            Log.e(TAG, "Error exporting DBC", e)
             Result.failure(e)
         }
     }
 
     suspend fun deleteDbc(info: DbcFileInfo): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            Log.i(TAG, "Deleting DBC: ${info.name}")
             File(info.path).delete()
             File(info.path.replace(".dbc", ".json")).delete()
 
             if (_activeDbc.value?.path == info.path) {
+                Log.d(TAG, "Deactivating deleted DBC")
                 _activeDbc.value = null
                 _activeDbcFile.value = null
             }
 
             refreshDbcList()
+            Log.i(TAG, "DBC deleted: ${info.name}")
             Result.success(Unit)
         } catch (e: Exception) {
+            Log.e(TAG, "Error deleting DBC", e)
             Result.failure(e)
         }
     }
 
     suspend fun createNewDbc(name: String, description: String = ""): Result<DbcFileInfo> = withContext(Dispatchers.IO) {
         try {
+            Log.i(TAG, "Creating new DBC: $name")
             val dbcFile = DbcFile(
                 version = "1.0",
                 description = description
@@ -224,8 +249,10 @@ class DbcRepository(private val context: Context) {
                 lastModified = targetFile.lastModified()
             )
 
+            Log.i(TAG, "DBC created: $name")
             Result.success(info)
         } catch (e: Exception) {
+            Log.e(TAG, "Error creating DBC", e)
             Result.failure(e)
         }
     }
@@ -279,12 +306,15 @@ class DbcRepository(private val context: Context) {
     // ---- MESSAGE OPERATIONS ----
 
     suspend fun addMessage(info: DbcFileInfo, message: DbcMessage): Result<Unit> {
+        Log.d(TAG, "Adding message: ${message.name} (${message.idHex}) to ${info.name}")
         return getDbcFile(info).fold(
             onSuccess = { dbcFile ->
                 if (dbcFile.messages.any { it.id == message.id }) {
+                    Log.w(TAG, "Message with ID ${message.idHex} already exists")
                     return Result.failure(Exception("Message mit ID ${message.idHex} existiert bereits"))
                 }
                 val updated = dbcFile.copy(messages = dbcFile.messages + message)
+                Log.i(TAG, "Message added: ${message.name}")
                 saveDbcFile(info, updated)
             },
             onFailure = { Result.failure(it) }
@@ -292,15 +322,18 @@ class DbcRepository(private val context: Context) {
     }
 
     suspend fun updateMessage(info: DbcFileInfo, message: DbcMessage): Result<Unit> {
+        Log.d(TAG, "Updating message: ${message.name} (${message.idHex})")
         return getDbcFile(info).fold(
             onSuccess = { dbcFile ->
                 val index = dbcFile.messages.indexOfFirst { it.id == message.id }
                 if (index == -1) {
+                    Log.w(TAG, "Message not found: ${message.idHex}")
                     return Result.failure(Exception("Message nicht gefunden"))
                 }
                 val newMessages = dbcFile.messages.toMutableList()
                 newMessages[index] = message
                 val updated = dbcFile.copy(messages = newMessages)
+                Log.i(TAG, "Message updated: ${message.name}")
                 saveDbcFile(info, updated)
             },
             onFailure = { Result.failure(it) }
@@ -308,13 +341,16 @@ class DbcRepository(private val context: Context) {
     }
 
     suspend fun deleteMessage(info: DbcFileInfo, messageId: Long): Result<Unit> {
+        Log.d(TAG, "Deleting message: 0x${messageId.toString(16).uppercase()}")
         return getDbcFile(info).fold(
             onSuccess = { dbcFile ->
                 val newMessages = dbcFile.messages.filter { it.id != messageId }
                 if (newMessages.size == dbcFile.messages.size) {
+                    Log.w(TAG, "Message not found: 0x${messageId.toString(16).uppercase()}")
                     return Result.failure(Exception("Message nicht gefunden"))
                 }
                 val updated = dbcFile.copy(messages = newMessages)
+                Log.i(TAG, "Message deleted: 0x${messageId.toString(16).uppercase()}")
                 saveDbcFile(info, updated)
             },
             onFailure = { Result.failure(it) }
@@ -324,20 +360,24 @@ class DbcRepository(private val context: Context) {
     // ---- SIGNAL OPERATIONS ----
 
     suspend fun addSignal(info: DbcFileInfo, messageId: Long, signal: DbcSignal): Result<Unit> {
+        Log.d(TAG, "Adding signal: ${signal.name} to message 0x${messageId.toString(16).uppercase()}")
         return getDbcFile(info).fold(
             onSuccess = { dbcFile ->
                 val msgIndex = dbcFile.messages.indexOfFirst { it.id == messageId }
                 if (msgIndex == -1) {
+                    Log.w(TAG, "Message not found")
                     return Result.failure(Exception("Message nicht gefunden"))
                 }
                 val message = dbcFile.messages[msgIndex]
                 if (message.signals.any { it.name == signal.name }) {
+                    Log.w(TAG, "Signal ${signal.name} already exists")
                     return Result.failure(Exception("Signal '${signal.name}' existiert bereits"))
                 }
                 val updatedMessage = message.copy(signals = message.signals + signal)
                 val newMessages = dbcFile.messages.toMutableList()
                 newMessages[msgIndex] = updatedMessage
                 val updated = dbcFile.copy(messages = newMessages)
+                Log.i(TAG, "Signal added: ${signal.name}")
                 saveDbcFile(info, updated)
             },
             onFailure = { Result.failure(it) }
@@ -345,6 +385,7 @@ class DbcRepository(private val context: Context) {
     }
 
     suspend fun updateSignal(info: DbcFileInfo, messageId: Long, oldSignalName: String, signal: DbcSignal): Result<Unit> {
+        Log.d(TAG, "Updating signal: $oldSignalName -> ${signal.name}")
         return getDbcFile(info).fold(
             onSuccess = { dbcFile ->
                 val msgIndex = dbcFile.messages.indexOfFirst { it.id == messageId }
@@ -354,10 +395,12 @@ class DbcRepository(private val context: Context) {
                 val message = dbcFile.messages[msgIndex]
                 val sigIndex = message.signals.indexOfFirst { it.name == oldSignalName }
                 if (sigIndex == -1) {
+                    Log.w(TAG, "Signal not found: $oldSignalName")
                     return Result.failure(Exception("Signal nicht gefunden"))
                 }
                 // Check for name collision if renamed
                 if (signal.name != oldSignalName && message.signals.any { it.name == signal.name }) {
+                    Log.w(TAG, "Signal ${signal.name} already exists")
                     return Result.failure(Exception("Signal '${signal.name}' existiert bereits"))
                 }
                 val newSignals = message.signals.toMutableList()
@@ -366,6 +409,7 @@ class DbcRepository(private val context: Context) {
                 val newMessages = dbcFile.messages.toMutableList()
                 newMessages[msgIndex] = updatedMessage
                 val updated = dbcFile.copy(messages = newMessages)
+                Log.i(TAG, "Signal updated: ${signal.name}")
                 saveDbcFile(info, updated)
             },
             onFailure = { Result.failure(it) }
@@ -373,6 +417,7 @@ class DbcRepository(private val context: Context) {
     }
 
     suspend fun deleteSignal(info: DbcFileInfo, messageId: Long, signalName: String): Result<Unit> {
+        Log.d(TAG, "Deleting signal: $signalName from message 0x${messageId.toString(16).uppercase()}")
         return getDbcFile(info).fold(
             onSuccess = { dbcFile ->
                 val msgIndex = dbcFile.messages.indexOfFirst { it.id == messageId }
@@ -382,12 +427,14 @@ class DbcRepository(private val context: Context) {
                 val message = dbcFile.messages[msgIndex]
                 val newSignals = message.signals.filter { it.name != signalName }
                 if (newSignals.size == message.signals.size) {
+                    Log.w(TAG, "Signal not found: $signalName")
                     return Result.failure(Exception("Signal nicht gefunden"))
                 }
                 val updatedMessage = message.copy(signals = newSignals)
                 val newMessages = dbcFile.messages.toMutableList()
                 newMessages[msgIndex] = updatedMessage
                 val updated = dbcFile.copy(messages = newMessages)
+                Log.i(TAG, "Signal deleted: $signalName")
                 saveDbcFile(info, updated)
             },
             onFailure = { Result.failure(it) }
@@ -397,12 +444,15 @@ class DbcRepository(private val context: Context) {
     // ---- NODE OPERATIONS ----
 
     suspend fun addNode(info: DbcFileInfo, node: DbcNode): Result<Unit> {
+        Log.d(TAG, "Adding node: ${node.name}")
         return getDbcFile(info).fold(
             onSuccess = { dbcFile ->
                 if (dbcFile.nodes.any { it.name == node.name }) {
+                    Log.w(TAG, "Node ${node.name} already exists")
                     return Result.failure(Exception("Node '${node.name}' existiert bereits"))
                 }
                 val updated = dbcFile.copy(nodes = dbcFile.nodes + node)
+                Log.i(TAG, "Node added: ${node.name}")
                 saveDbcFile(info, updated)
             },
             onFailure = { Result.failure(it) }
@@ -410,13 +460,16 @@ class DbcRepository(private val context: Context) {
     }
 
     suspend fun deleteNode(info: DbcFileInfo, nodeName: String): Result<Unit> {
+        Log.d(TAG, "Deleting node: $nodeName")
         return getDbcFile(info).fold(
             onSuccess = { dbcFile ->
                 val newNodes = dbcFile.nodes.filter { it.name != nodeName }
                 if (newNodes.size == dbcFile.nodes.size) {
+                    Log.w(TAG, "Node not found: $nodeName")
                     return Result.failure(Exception("Node nicht gefunden"))
                 }
                 val updated = dbcFile.copy(nodes = newNodes)
+                Log.i(TAG, "Node deleted: $nodeName")
                 saveDbcFile(info, updated)
             },
             onFailure = { Result.failure(it) }

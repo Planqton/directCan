@@ -1,3 +1,290 @@
 <resources>
-    <string name="app_name">directCan</string>
+    <string name="app_name">DirectCAN</string>
+
+    <!-- Common -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="close">Close</string>
+    <string name="back">Back</string>
+    <string name="refresh">Refresh</string>
+    <string name="error">Error</string>
+    <string name="loading">Loading…</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
+    <string name="create">Create</string>
+    <string name="edit">Edit</string>
+    <string name="details">Details</string>
+    <string name="export">Export</string>
+    <string name="import_text">Import</string>
+    <string name="send">Send</string>
+    <string name="discard">Discard</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_monitor">Monitor</string>
+    <string name="nav_sniffer">Sniffer</string>
+    <string name="nav_signals">Signals</string>
+    <string name="nav_graph">Graph</string>
+    <string name="nav_dbc">DBC</string>
+    <string name="nav_settings">Settings</string>
+    <string name="nav_snapshot">Snap</string>
+    <string name="nav_simulator">Simulator</string>
+    <string name="nav_ai">AI</string>
+
+    <!-- Home Screen -->
+    <string name="connection_status">Connection Status</string>
+    <string name="connected">Connected</string>
+    <string name="connecting">Connecting…</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="connection_error">Error</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="auto_start_logging">Start logging automatically</string>
+    <string name="logging_active">Logging active</string>
+    <string name="active_dbc">Active DBC</string>
+    <string name="no_dbc_loaded">No DBC loaded</string>
+    <string name="debug">Debug</string>
+    <string name="status">Status</string>
+    <string name="info">Info</string>
+    <string name="reset_stats">Reset Stats</string>
+    <string name="reset_stats_desc">Delete filters, active DBC and all data</string>
+    <string name="reset_all_data">Reset all data?</string>
+    <string name="reset_all_data_desc">This will delete all filters, the active DBC assignment, all saved settings and all captured data. This action cannot be undone.</string>
+    <string name="reset">Reset</string>
+    <string name="quick_access">Quick Access</string>
+    <string name="can_monitor">CAN Monitor</string>
+    <string name="read_dtcs">Read DTCs</string>
+    <string name="available_devices">Available Devices</string>
+    <string name="select_device">Select Device</string>
+    <string name="no_devices_found">No devices found</string>
+    <string name="simulation_mode">Simulation Mode</string>
+    <string name="usb_permission_denied">USB permission denied</string>
+
+    <!-- Monitor Screen -->
+    <string name="frames">Frames</string>
+    <string name="fps">fps</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume</string>
+    <string name="clear">Clear</string>
+    <string name="filter">Filter</string>
+    <string name="overwrite_mode">Overwrite</string>
+    <string name="scroll_mode">Scroll</string>
+    <string name="frame_id">ID</string>
+    <string name="frame_data">Data</string>
+    <string name="frame_time">Time</string>
+    <string name="frame_length">Len</string>
+    <string name="frame_ascii">ASCII</string>
+    <string name="frame_decoded">Decoded</string>
+    <string name="extended">Ext</string>
+    <string name="rtr">RTR</string>
+    <string name="direction">Dir</string>
+    <string name="bus">Bus</string>
+    <string name="select_all">Select All</string>
+    <string name="deselect_all">Deselect All</string>
+    <string name="filter_frames">Filter Frames</string>
+    <string name="no_frames">No frames captured</string>
+    <string name="start_logging_hint">Connect to a device and start logging to see CAN frames</string>
+
+    <!-- Sniffer Screen -->
+    <string name="unique_ids">Unique IDs</string>
+    <string name="total_frames">Total Frames</string>
+    <string name="byte_view">Bytes</string>
+    <string name="bit_view">Bits</string>
+    <string name="notch_bits">Notch Bits</string>
+    <string name="clear_notched">Clear Notched</string>
+    <string name="updates">Updates</string>
+
+    <!-- Signal Viewer -->
+    <string name="signal_viewer">Signal Viewer</string>
+    <string name="no_signals">No signals</string>
+    <string name="no_dbc_hint">Load a DBC file to see decoded signals</string>
+    <string name="search_signals">Search signals…</string>
+    <string name="message">Message</string>
+    <string name="signal">Signal</string>
+    <string name="value">Value</string>
+    <string name="unit">Unit</string>
+    <string name="last_update">Last Update</string>
+
+    <!-- Signal Graph -->
+    <string name="signal_graph">Signal Graph</string>
+    <string name="select_signals">Select Signals</string>
+    <string name="no_data">No data</string>
+    <string name="clear_history">Clear History</string>
+    <string name="auto_scroll">Auto-scroll</string>
+    <string name="time_window">Time Window</string>
+    <string name="seconds">seconds</string>
+
+    <!-- DBC Manager -->
+    <string name="dbc_manager">DBC Manager</string>
+    <string name="import_dbc">Import DBC</string>
+    <string name="no_dbc_files">No DBC files available</string>
+    <string name="import_dbc_hint">Import a DBC file to decode CAN messages</string>
+    <string name="available_dbc_files">Available DBC Files</string>
+    <string name="active">Active</string>
+    <string name="deactivate">Deactivate</string>
+    <string name="delete_dbc">Delete DBC?</string>
+    <string name="delete_dbc_confirm">Do you really want to delete \"%1$s\"?</string>
+    <string name="messages">Messages</string>
+    <string name="signals">Signals</string>
+    <string name="nodes">Nodes</string>
+    <string name="bytes">Bytes</string>
+    <string name="storage_location">Storage Location</string>
+    <string name="new_dbc">New DBC</string>
+    <string name="dbc_name">DBC Name</string>
+
+    <!-- DBC Editor -->
+    <string name="dbc_editor">DBC Editor</string>
+    <string name="add_message">Add Message</string>
+    <string name="edit_message">Edit Message</string>
+    <string name="delete_message">Delete Message</string>
+    <string name="add_signal">Add Signal</string>
+    <string name="edit_signal">Edit Signal</string>
+    <string name="delete_signal">Delete Signal</string>
+    <string name="message_id">Message ID</string>
+    <string name="message_name">Message Name</string>
+    <string name="message_length">Length</string>
+    <string name="signal_name">Signal Name</string>
+    <string name="start_bit">Start Bit</string>
+    <string name="bit_length">Bit Length</string>
+    <string name="byte_order">Byte Order</string>
+    <string name="little_endian">Little Endian</string>
+    <string name="big_endian">Big Endian</string>
+    <string name="factor">Factor</string>
+    <string name="offset">Offset</string>
+    <string name="minimum">Minimum</string>
+    <string name="maximum">Maximum</string>
+    <string name="signed">Signed</string>
+    <string name="unsigned">Unsigned</string>
+
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="language">Language</string>
+    <string name="language_system">System Default</string>
+    <string name="language_en">English</string>
+    <string name="language_de">German</string>
+    <string name="appearance">Appearance</string>
+    <string name="theme">Theme</string>
+    <string name="theme_system">System</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="can_settings">CAN Settings</string>
+    <string name="baudrate">Baudrate</string>
+    <string name="log_management">Log Management</string>
+    <string name="log_directory">Log Directory</string>
+    <string name="select_folder">Select Folder</string>
+    <string name="ai_settings">AI Settings</string>
+    <string name="gemini_ai">Gemini AI</string>
+    <string name="configure_api">Configure API key and model</string>
+    <string name="about">About</string>
+    <string name="version">Version</string>
+    <string name="help">Help</string>
+
+    <!-- Log Manager -->
+    <string name="log_manager">Log Manager</string>
+    <string name="new_log">New Log</string>
+    <string name="create_new_log">Create new log</string>
+    <string name="log_name">Log Name</string>
+    <string name="enter_log_name">Enter a name for the log:</string>
+    <string name="no_log_files">No log files available</string>
+    <string name="create_log_hint">Create a new log file to save snapshots</string>
+    <string name="delete_log">Delete Log?</string>
+    <string name="delete_log_confirm">Do you really want to delete the log \"%1$s\"? This action cannot be undone.</string>
+    <string name="snapshots">Snapshots</string>
+    <string name="ai_analysis">AI Analysis</string>
+
+    <!-- Snapshot Dialog -->
+    <string name="snapshot_saved">Snapshot Saved!</string>
+    <string name="save_to_log">Save to which log?</string>
+    <string name="create_new_log_option">+ Create new log</string>
+    <string name="select_log">Select log…</string>
+    <string name="description">Description</string>
+    <string name="description_hint">e.g. Water temperature 10°C</string>
+    <string name="unnamed_snapshot">Unnamed Snapshot</string>
+
+    <!-- Gemini Settings -->
+    <string name="api_configuration">API Configuration</string>
+    <string name="api_key">API Key</string>
+    <string name="not_configured">Not configured</string>
+    <string name="model">Model</string>
+    <string name="not_selected">Not selected</string>
+    <string name="delta_compression">Delta Compression</string>
+    <string name="delta_compression_desc">Only send changed frames between snapshots</string>
+    <string name="test_connection">Test</string>
+    <string name="test_chat">Test Chat</string>
+    <string name="connection_successful">Connection successful!</string>
+    <string name="connection_failed">Connection failed</string>
+    <string name="chat_history">Chat History</string>
+    <string name="delete_chat">Delete Chat?</string>
+    <string name="delete_chat_confirm">Do you really want to delete this chat?</string>
+    <string name="api_key_hint">Get API key at ai.google.dev</string>
+    <string name="enter_api_key">Enter API Key</string>
+    <string name="select_model">Select Model</string>
+    <string name="info_gemini">To use AI analysis, you need a Google Gemini API key. Get one at ai.google.dev.</string>
+
+    <!-- Gemini Chat -->
+    <string name="ai_chat">AI Chat</string>
+    <string name="snapshot_loaded">Snapshot loaded</string>
+    <string name="snapshot_loaded_desc">I have loaded the snapshot \"%1$s\". Ask me questions about analyzing the CAN bus data.</string>
+    <string name="chat_not_found">Chat not found</string>
+    <string name="enter_message">Enter message…</string>
+    <string name="gemini_thinking">Gemini is thinking…</string>
+    <string name="snapshot_data_title">Snapshot Data for Gemini</string>
+    <string name="delta_compressed">Delta Compressed</string>
+    <string name="original">Original</string>
+    <string name="n_messages">%1$d messages</string>
+
+    <!-- Simulator -->
+    <string name="simulator">Simulator</string>
+    <string name="engine_speed">Engine &amp; Speed</string>
+    <string name="engine_running">Engine running</string>
+    <string name="rpm">RPM</string>
+    <string name="speed">Speed</string>
+    <string name="throttle">Throttle</string>
+    <string name="brake">Brake</string>
+    <string name="gear">Gear</string>
+    <string name="temperatures">Temperatures</string>
+    <string name="engine_temp">Engine Temperature</string>
+    <string name="outside_temp">Outside Temperature</string>
+    <string name="fuel_battery">Fuel &amp; Battery</string>
+    <string name="fuel_level">Fuel Level</string>
+    <string name="battery_voltage">Battery Voltage</string>
+    <string name="steering">Steering</string>
+    <string name="steering_angle">Steering Angle</string>
+    <string name="lights">Lights</string>
+    <string name="left_blinker">Left</string>
+    <string name="right_blinker">Right</string>
+    <string name="hazard_lights">Hazard</string>
+    <string name="low_beam">Low Beam</string>
+    <string name="high_beam">High Beam</string>
+    <string name="fog_lights">Fog</string>
+    <string name="doors">Doors</string>
+    <string name="driver_door">Driver</string>
+    <string name="passenger_door">Passenger</string>
+    <string name="trunk">Trunk</string>
+    <string name="hood">Hood</string>
+    <string name="steering_buttons">Steering Buttons</string>
+    <string name="horn">Horn</string>
+    <string name="cruise_control">Cruise Control</string>
+    <string name="media_control">Media Control</string>
+    <string name="vehicle_data">Vehicle Data</string>
+    <string name="vin">VIN (Vehicle Identification Number)</string>
+    <string name="odometer">Odometer</string>
+    <string name="new_value">New value (km)</string>
+    <string name="set">Set</string>
+
+    <!-- Errors -->
+    <string name="error_loading_models">Error loading models: %1$s</string>
+    <string name="error_no_model">No model configured</string>
+    <string name="error_invalid_api_key">Invalid API key</string>
+    <string name="error_network">Network error: No internet connection</string>
+    <string name="error_server">Server error: %1$s</string>
+    <string name="error_prompt_blocked">Request was blocked (Safety Filter)</string>
+    <string name="error_format">Response format error. Try a different model (e.g. gemini-1.5-flash)</string>
+    <string name="error_connection_test">Connection test failed: %1$s</string>
+    <string name="error_simulation">Simulation failed: %1$s</string>
+    <string name="error_import">Import failed: %1$s</string>
+    <string name="error_create_log">Error creating log file</string>
+    <string name="error_read_file">Error reading file: %1$s</string>
 </resources>

@@ -2,8 +2,13 @@ package at.planqton.directcan.ui.navigation
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
@@ -29,9 +34,29 @@ sealed class Screen(
     }
     // Snapshot is a special button, not a navigation destination
     object Snapshot : Screen("snapshot", "Snap", Icons.Default.CameraAlt)
+    // Simulator screen - only shown when in simulation mode
+    object Simulator : Screen("simulator", "Simulator", Icons.Default.DirectionsCar)
+    // Gemini AI screens
+    object GeminiSettings : Screen("gemini_settings", "Gemini", Icons.Default.Psychology)
+    object GeminiChat : Screen("gemini_chat/{chatId}", "AI Chat", Icons.Default.Chat) {
+        fun createRoute(chatId: String) = "gemini_chat/${java.net.URLEncoder.encode(chatId, "UTF-8")}"
+    }
+    // Active AI Chat - for bottom nav when chat is open
+    object ActiveAiChat : Screen("active_ai_chat", "AI", Icons.Default.Chat)
+    // TX Script screens
+    object TxScriptManager : Screen("txscript_manager", "TX Scripts", Icons.Default.Code)
+    object TxScriptEditor : Screen("txscript_editor/{scriptPath}", "Script Editor", Icons.Default.Edit) {
+        fun createRoute(scriptPath: String) = "txscript_editor/${java.net.URLEncoder.encode(scriptPath, "UTF-8")}"
+    }
 
     companion object {
         // Snapshot button after Settings - no navigation, just action
         val bottomNavItems = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, Snapshot)
+        // Items including Simulator (used when in simulation mode)
+        val bottomNavItemsWithSimulator = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, Simulator, Snapshot)
+        // Items including AI Chat
+        val bottomNavItemsWithAiChat = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, ActiveAiChat, Snapshot)
+        // Items with both Simulator and AI Chat
+        val bottomNavItemsWithSimulatorAndAiChat = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, Simulator, ActiveAiChat, Snapshot)
     }
 }

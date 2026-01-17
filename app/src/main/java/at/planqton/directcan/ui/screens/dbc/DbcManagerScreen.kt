@@ -131,7 +131,8 @@ fun DbcManagerScreen(
                         info = info,
                         dbc = dbc,
                         onExport = { exportLauncher.launch("${info.name}.dbc") },
-                        onViewDetails = { showDbcDetails = info }
+                        onViewDetails = { showDbcDetails = info },
+                        onDeactivate = { dbcRepository.deactivateDbc() }
                     )
                 }
             }
@@ -253,7 +254,8 @@ fun ActiveDbcCard(
     info: DbcFileInfo,
     dbc: DbcFile,
     onExport: () -> Unit,
-    onViewDetails: () -> Unit
+    onViewDetails: () -> Unit,
+    onDeactivate: () -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -276,6 +278,17 @@ fun ActiveDbcCard(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    onClick = onDeactivate,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(Icons.Default.Close, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Deaktivieren")
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text(

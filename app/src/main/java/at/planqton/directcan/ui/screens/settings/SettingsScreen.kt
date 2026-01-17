@@ -1,5 +1,6 @@
 package at.planqton.directcan.ui.screens.settings
 
+import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,20 +12,30 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import at.planqton.directcan.DirectCanApplication
+import at.planqton.directcan.R
+import at.planqton.directcan.util.LocaleHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onNavigateToLogManager: () -> Unit = {}
+    onNavigateToLogManager: () -> Unit = {},
+    onNavigateToGeminiSettings: () -> Unit = {},
+    onNavigateToTxScriptManager: () -> Unit = {}
 ) {
     val usbManager = DirectCanApplication.instance.usbSerialManager
     val canDataRepository = DirectCanApplication.instance.canDataRepository
+    val settingsRepository = DirectCanApplication.instance.settingsRepository
+    val txScriptRepository = DirectCanApplication.instance.txScriptRepository
     val logFiles by canDataRepository.logFiles.collectAsState()
     val logDirectoryUri by canDataRepository.logDirectoryUri.collectAsState()
+    val txScripts by txScriptRepository.scripts.collectAsState()
 
     var selectedBaudrate by remember { mutableIntStateOf(500000) }
     var showBaudrateDialog by remember { mutableStateOf(false) }
@@ -34,6 +45,20 @@ fun SettingsScreen(
     var hexDisplay by remember { mutableStateOf(true) }
     var logToFile by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
+
+    // Hide simulation mode setting
+    val hideSimulationMode by settingsRepository.hideSimulationMode.collectAsState(initial = false)
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    // Language setting
+    val currentLanguage by settingsRepository.language.collectAsState(initial = "system")
+    var showLanguageDialog by remember { mutableStateOf(false) }
+
+    // Dev settings
+    val devLogEnabled by settingsRepository.devLogEnabled.collectAsState(initial = true)
+    val devLogIntervalMinutes by settingsRepository.devLogIntervalMinutes.collectAsState(initial = 5)
+    var showDevLogIntervalDialog by remember { mutableStateOf(false) }
 
     // Folder picker launcher
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -97,9 +122,33 @@ fun SettingsScreen(
                 )
             }
 
+            item {
+                SettingsSwitchItem(
+                    icon = Icons.Default.VisibilityOff,
+                    title = "Simulations-Modus ausblenden",
+                    subtitle = if (hideSimulationMode) "Wird nicht in Geräteliste angezeigt" else "Wird in Geräteliste angezeigt",
+                    checked = hideSimulationMode,
+                    onCheckedChange = {
+                        scope.launch {
+                            settingsRepository.setHideSimulationMode(it)
+                            usbManager.refreshDeviceList(it)
+                        }
+                    }
+                )
+            }
+
             // Display Settings
             item {
-                SettingsSectionHeader("Anzeige")
+                SettingsSectionHeader(stringResource(R.string.appearance))
+            }
+
+            item {
+                SettingsItem(
+                    icon = Icons.Default.Language,
+                    title = stringResource(R.string.language),
+                    subtitle = LocaleHelper.getLanguageDisplayName(currentLanguage, context),
+                    onClick = { showLanguageDialog = true }
+                )
             }
 
             item {
@@ -155,6 +204,65 @@ fun SettingsScreen(
                 )
             }
 
+            // TX Scripts Section
+            item {
+                SettingsSectionHeader("TX Scripts")
+            }
+
+            item {
+                SettingsItem(
+                    icon = Icons.Default.Code,
+                    title = "TX Script Manager",
+                    subtitle = "${txScripts.size} Scripts verwalten",
+                    onClick = onNavigateToTxScriptManager
+                )
+            }
+
+            // AI Section
+            item {
+                SettingsSectionHeader("Künstliche Intelligenz")
+            }
+
+            item {
+                SettingsItem(
+                    icon = Icons.Default.Psychology,
+                    title = "Gemini AI",
+                    subtitle = "API-Key und Modell konfigurieren",
+                    onClick = onNavigateToGeminiSettings
+                )
+            }
+
+            // Dev Menu Section
+            item {
+                SettingsSectionHeader("Entwickler")
+            }
+
+            item {
+                SettingsSwitchItem(
+                    icon = Icons.Default.BugReport,
+                    title = "Status-Logging",
+                    subtitle = if (devLogEnabled)
+                        "Logcat-Ausgabe alle $devLogIntervalMinutes Min während Capture"
+                    else
+                        "Deaktiviert",
+                    checked = devLogEnabled,
+                    onCheckedChange = {
+                        scope.launch { settingsRepository.setDevLogEnabled(it) }
+                    }
+                )
+            }
+
+            if (devLogEnabled) {
+                item {
+                    SettingsItem(
+                        icon = Icons.Default.Timer,
+                        title = "Log-Intervall",
+                        subtitle = "$devLogIntervalMinutes Minuten",
+                        onClick = { showDevLogIntervalDialog = true }
+                    )
+                }
+            }
+
             // About Section
             item {
                 SettingsSectionHeader("Info")
@@ -200,6 +308,36 @@ fun SettingsScreen(
     // About Dialog
     if (showAboutDialog) {
         AboutDialog(onDismiss = { showAboutDialog = false })
+    }
+
+    // Language Selection Dialog
+    if (showLanguageDialog) {
+        LanguageSelectionDialog(
+            currentLanguage = currentLanguage,
+            onLanguageSelected = { lang ->
+                scope.launch {
+                    settingsRepository.setLanguage(lang)
+                    // Restart activity to apply language change
+                    (context as? Activity)?.let { activity ->
+                        activity.recreate()
+                    }
+                }
+                showLanguageDialog = false
+            },
+            onDismiss = { showLanguageDialog = false }
+        )
+    }
+
+    // Dev Log Interval Dialog
+    if (showDevLogIntervalDialog) {
+        DevLogIntervalDialog(
+            currentInterval = devLogIntervalMinutes,
+            onIntervalSelected = { interval ->
+                scope.launch { settingsRepository.setDevLogIntervalMinutes(interval) }
+                showDevLogIntervalDialog = false
+            },
+            onDismiss = { showDevLogIntervalDialog = false }
+        )
     }
 }
 
@@ -336,6 +474,49 @@ fun BaudrateSelectionDialog(
 }
 
 @Composable
+fun LanguageSelectionDialog(
+    currentLanguage: String,
+    onLanguageSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val languages = listOf(
+        "system" to stringResource(R.string.language_system),
+        "en" to stringResource(R.string.language_en),
+        "de" to stringResource(R.string.language_de)
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.language)) },
+        text = {
+            Column {
+                languages.forEach { (code, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onLanguageSelected(code) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = code == currentLanguage,
+                            onClick = { onLanguageSelected(code) }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(label)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
 fun AboutDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -370,6 +551,58 @@ fun AboutDialog(onDismiss: () -> Unit) {
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("OK")
+            }
+        }
+    )
+}
+
+@Composable
+fun DevLogIntervalDialog(
+    currentInterval: Int,
+    onIntervalSelected: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val intervals = listOf(
+        1 to "1 Minute",
+        2 to "2 Minuten",
+        5 to "5 Minuten",
+        10 to "10 Minuten",
+        15 to "15 Minuten",
+        30 to "30 Minuten"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Log-Intervall wählen") },
+        text = {
+            Column {
+                Text(
+                    "Wie oft soll der Status ins Logcat geschrieben werden?",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                intervals.forEach { (minutes, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onIntervalSelected(minutes) }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = minutes == currentInterval,
+                            onClick = { onIntervalSelected(minutes) }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(label)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Abbrechen")
             }
         }
     )

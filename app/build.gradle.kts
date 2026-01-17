@@ -92,6 +92,9 @@ dependencies {
     // Vico Charts (for signal graphing)
     implementation("com.patrykandpatrick.vico:compose-m3:2.0.0-beta.1")
 
+    // Google Generative AI (Gemini)
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

@@ -1,18 +1,29 @@
 package at.planqton.directcan
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -30,10 +41,28 @@ import at.planqton.directcan.ui.screens.monitor.MonitorScreen
 import at.planqton.directcan.ui.screens.settings.SettingsScreen
 import at.planqton.directcan.ui.screens.signals.SignalGraphScreen
 import at.planqton.directcan.ui.screens.signals.SignalViewerScreen
+import at.planqton.directcan.ui.screens.simulator.SimulatorScreen
 import at.planqton.directcan.ui.screens.sniffer.SnifferScreen
+import at.planqton.directcan.ui.screens.gemini.GeminiSettingsScreen
+import at.planqton.directcan.ui.screens.gemini.GeminiChatScreen
+import at.planqton.directcan.ui.screens.txscript.TxScriptManagerScreen
+import at.planqton.directcan.ui.screens.txscript.ScriptEditorScreen
 import at.planqton.directcan.ui.theme.DirectCanTheme
+import at.planqton.directcan.util.LocaleHelper
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 class MainActivity : ComponentActivity() {
+
+    override fun attachBaseContext(newBase: Context) {
+        // Get saved language setting and apply locale
+        val language = runBlocking {
+            DirectCanApplication.instance.settingsRepository.getLanguageSync()
+        }
+        val context = LocaleHelper.setLocale(newBase, language)
+        super.attachBaseContext(context)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -47,8 +76,132 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainApp() {
+    val context = LocalContext.current
+    var permissionsChecked by remember { mutableStateOf(false) }
+    var permissionsDenied by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    // Build list of required permissions based on Android version
+    val requiredPermissions = remember {
+        buildList {
+            // Notification permission (Android 13+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            // Storage permissions (Android < 13)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.READ_EXTERNAL_STORAGE)
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
+        }
+    }
+
+    // Permission launcher for multiple permissions
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        permissionsDenied = results.filter { !it.value }.keys.toList()
+        permissionsChecked = true
+    }
+
+    // Check permissions on start
+    LaunchedEffect(Unit) {
+        if (requiredPermissions.isEmpty()) {
+            permissionsChecked = true
+        } else {
+            val notGranted = requiredPermissions.filter {
+                ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+            }
+            if (notGranted.isEmpty()) {
+                permissionsChecked = true
+            } else {
+                permissionLauncher.launch(notGranted.toTypedArray())
+            }
+        }
+    }
+
+    // Show permission dialog if not all granted
+    if (permissionsChecked && permissionsDenied.isNotEmpty()) {
+        PermissionDeniedDialog(
+            deniedPermissions = permissionsDenied,
+            onContinue = { permissionsDenied = emptyList() }
+        )
+    }
+
+    // Main app content (always shown, even if some permissions denied)
+    if (permissionsChecked) {
+        MainAppContent()
+    } else {
+        // Loading while checking permissions
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+    }
+}
+
+@Composable
+fun PermissionDeniedDialog(
+    deniedPermissions: List<String>,
+    onContinue: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onContinue,
+        icon = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text("Berechtigungen fehlen") },
+        text = {
+            Column {
+                Text("Einige Funktionen sind möglicherweise eingeschränkt:")
+                Spacer(Modifier.height(8.dp))
+                deniedPermissions.forEach { permission ->
+                    val name = when {
+                        permission.contains("NOTIFICATION") -> "Benachrichtigungen (für Hintergrund-Logging)"
+                        permission.contains("STORAGE") || permission.contains("EXTERNAL") -> "Speicher (für Log-Dateien)"
+                        else -> permission.substringAfterLast(".")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.Warning,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(name, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Du kannst die Berechtigungen in den System-Einstellungen aktivieren.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onContinue) {
+                Text("Verstanden")
+            }
+        }
+    )
+}
+
+@Composable
+fun MainAppContent() {
     val navController = rememberNavController()
     val canDataRepository = DirectCanApplication.instance.canDataRepository
+    val usbManager = DirectCanApplication.instance.usbSerialManager
+    val geminiRepository = DirectCanApplication.instance.geminiRepository
+
+    // Simulation mode state
+    val isSimulationMode by usbManager.isSimulationMode.collectAsState()
+
+    // Active AI Chat state
+    val activeChatId by geminiRepository.activeChatId.collectAsState()
+    val hasActiveChat = activeChatId != null
 
     // Snapshot state
     var pendingSnapshot by remember { mutableStateOf<CanDataRepository.SnapshotData?>(null) }
@@ -58,10 +211,17 @@ fun MainApp() {
         bottomBar = {
             BottomNavBar(
                 navController = navController,
+                isSimulationMode = isSimulationMode,
+                hasActiveChat = hasActiveChat,
                 onSnapshotClick = {
                     // Capture snapshot IMMEDIATELY
                     pendingSnapshot = canDataRepository.captureSnapshot()
                     showSnapshotDialog = true
+                },
+                onAiChatClick = {
+                    activeChatId?.let { chatId ->
+                        navController.navigate(Screen.GeminiChat.createRoute(chatId))
+                    }
                 }
             )
         }
@@ -103,11 +263,60 @@ fun MainApp() {
                 SettingsScreen(
                     onNavigateToLogManager = {
                         navController.navigate(Screen.LogManager.route)
+                    },
+                    onNavigateToGeminiSettings = {
+                        navController.navigate(Screen.GeminiSettings.route)
+                    },
+                    onNavigateToTxScriptManager = {
+                        navController.navigate(Screen.TxScriptManager.route)
                     }
                 )
             }
             composable(Screen.LogManager.route) {
                 LogManagerScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToChat = { chatId ->
+                        navController.navigate(Screen.GeminiChat.createRoute(chatId))
+                    }
+                )
+            }
+            composable(Screen.Simulator.route) {
+                SimulatorScreen()
+            }
+            composable(Screen.GeminiSettings.route) {
+                GeminiSettingsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToChat = { chatId ->
+                        navController.navigate(Screen.GeminiChat.createRoute(chatId))
+                    }
+                )
+            }
+            composable(Screen.GeminiChat.route) { backStackEntry ->
+                val encodedChatId = backStackEntry.arguments?.getString("chatId") ?: ""
+                val chatId = URLDecoder.decode(encodedChatId, "UTF-8")
+                GeminiChatScreen(
+                    chatId = chatId,
+                    onNavigateBack = { navController.popBackStack() },
+                    onSwitchChat = { newChatId ->
+                        navController.navigate(Screen.GeminiChat.createRoute(newChatId)) {
+                            popUpTo(Screen.GeminiChat.route) { inclusive = true }
+                        }
+                    }
+                )
+            }
+            composable(Screen.TxScriptManager.route) {
+                TxScriptManagerScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToEditor = { scriptPath ->
+                        navController.navigate(Screen.TxScriptEditor.createRoute(scriptPath))
+                    }
+                )
+            }
+            composable(Screen.TxScriptEditor.route) { backStackEntry ->
+                val encodedPath = backStackEntry.arguments?.getString("scriptPath") ?: ""
+                val scriptPath = URLDecoder.decode(encodedPath, "UTF-8")
+                ScriptEditorScreen(
+                    scriptPath = scriptPath,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -126,6 +335,11 @@ fun MainApp() {
                 canDataRepository.saveSnapshot(pendingSnapshot!!, logFile, description)
                 showSnapshotDialog = false
                 pendingSnapshot = null
+            },
+            onNavigateToLogManager = {
+                showSnapshotDialog = false
+                pendingSnapshot = null
+                navController.navigate(Screen.LogManager.route)
             }
         )
     }
@@ -136,12 +350,16 @@ fun MainApp() {
 fun SnapshotDialog(
     snapshot: CanDataRepository.SnapshotData,
     onDismiss: () -> Unit,
-    onSave: (CanDataRepository.LogFileInfo, String) -> Unit
+    onSave: (CanDataRepository.LogFileInfo, String) -> Unit,
+    onNavigateToLogManager: () -> Unit = {}
 ) {
     val canDataRepository = DirectCanApplication.instance.canDataRepository
+    val geminiRepository = DirectCanApplication.instance.geminiRepository
     val logFiles by canDataRepository.logFiles.collectAsState()
     val recentDescriptions by canDataRepository.recentDescriptions.collectAsState()
+    val chatSessions by geminiRepository.chatSessions.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var selectedLogFile by remember { mutableStateOf<CanDataRepository.LogFileInfo?>(null) }
     var description by remember { mutableStateOf("") }
@@ -270,6 +488,22 @@ fun SnapshotDialog(
                     singleLine = false,
                     maxLines = 3
                 )
+
+                Spacer(Modifier.height(12.dp))
+
+                // Button to Log Manager
+                TextButton(
+                    onClick = onNavigateToLogManager,
+                    modifier = Modifier.align(Alignment.Start)
+                ) {
+                    Icon(
+                        Icons.Default.Folder,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Log Manager öffnen")
+                }
             }
         },
         confirmButton = {
@@ -277,6 +511,24 @@ fun SnapshotDialog(
                 onClick = {
                     selectedLogFile?.let { logFile ->
                         onSave(logFile, description.ifBlank { "Unbenannter Snapshot" })
+
+                        // Update any open chat for this log file
+                        val relatedChat = chatSessions.find { it.snapshotName == logFile.name }
+                        if (relatedChat != null) {
+                            scope.launch {
+                                // Read the updated log file content (always store original)
+                                // Delta compression is applied when sending to Gemini
+                                try {
+                                    val content = context.contentResolver
+                                        .openInputStream(logFile.uri)?.bufferedReader()?.use { it.readText() }
+                                        ?: "Keine Daten"
+                                    geminiRepository.updateSnapshotData(relatedChat.id, content)
+                                } catch (e: Exception) {
+                                    // Ignore errors
+                                }
+                            }
+                        }
+
                         Toast.makeText(context, "Snapshot gespeichert!", Toast.LENGTH_SHORT).show()
                     }
                 },
@@ -338,25 +590,85 @@ fun SnapshotDialog(
 @Composable
 fun BottomNavBar(
     navController: NavHostController,
-    onSnapshotClick: () -> Unit
+    isSimulationMode: Boolean = false,
+    hasActiveChat: Boolean = false,
+    onSnapshotClick: () -> Unit,
+    onAiChatClick: () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    NavigationBar {
-        Screen.bottomNavItems.forEach { screen ->
+    // Use different nav items based on simulation mode and active chat
+    val navItems = when {
+        isSimulationMode && hasActiveChat -> Screen.bottomNavItemsWithSimulatorAndAiChat
+        isSimulationMode -> Screen.bottomNavItemsWithSimulator
+        hasActiveChat -> Screen.bottomNavItemsWithAiChat
+        else -> Screen.bottomNavItems
+    }
+
+    NavigationBar(
+        modifier = Modifier.height(56.dp),
+        tonalElevation = 2.dp
+    ) {
+        navItems.forEach { screen ->
             if (screen == Screen.Snapshot) {
                 // Special handling for snapshot button - just action, no navigation
                 NavigationBarItem(
-                    icon = { Icon(screen.icon, contentDescription = screen.title) },
-                    label = { Text(screen.title) },
+                    icon = {
+                        Icon(
+                            screen.icon,
+                            contentDescription = screen.title,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    label = {
+                        Text(
+                            screen.title,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1
+                        )
+                    },
                     selected = false,
-                    onClick = onSnapshotClick
+                    onClick = onSnapshotClick,
+                    alwaysShowLabel = true
+                )
+            } else if (screen == Screen.ActiveAiChat) {
+                // Special handling for AI Chat button - navigates to active chat
+                NavigationBarItem(
+                    icon = {
+                        Icon(
+                            screen.icon,
+                            contentDescription = screen.title,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    label = {
+                        Text(
+                            screen.title,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1
+                        )
+                    },
+                    selected = currentRoute?.startsWith("gemini_chat") == true,
+                    onClick = onAiChatClick,
+                    alwaysShowLabel = true
                 )
             } else {
                 NavigationBarItem(
-                    icon = { Icon(screen.icon, contentDescription = screen.title) },
-                    label = { Text(screen.title) },
+                    icon = {
+                        Icon(
+                            screen.icon,
+                            contentDescription = screen.title,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    label = {
+                        Text(
+                            screen.title,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1
+                        )
+                    },
                     selected = currentRoute == screen.route,
                     onClick = {
                         navController.navigate(screen.route) {
@@ -366,7 +678,8 @@ fun BottomNavBar(
                             launchSingleTop = true
                             restoreState = true
                         }
-                    }
+                    },
+                    alwaysShowLabel = true
                 )
             }
         }

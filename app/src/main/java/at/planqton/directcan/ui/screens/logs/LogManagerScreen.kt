@@ -1,6 +1,7 @@
 package at.planqton.directcan.ui.screens.logs
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -13,7 +14,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import at.planqton.directcan.DirectCanApplication
 import at.planqton.directcan.data.can.CanDataRepository
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -21,16 +25,29 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogManagerScreen(
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onNavigateToChat: (String) -> Unit = {}
 ) {
     val canDataRepository = DirectCanApplication.instance.canDataRepository
+    val geminiRepository = DirectCanApplication.instance.geminiRepository
     val logFiles by canDataRepository.logFiles.collectAsState()
+
+    val apiKey by geminiRepository.apiKey.collectAsState(initial = null)
+    val selectedModel by geminiRepository.selectedModel.collectAsState(initial = null)
+    val isGeminiConfigured = !apiKey.isNullOrBlank() && !selectedModel.isNullOrBlank()
+
+    val dbcRepository = DirectCanApplication.instance.dbcRepository
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var newLogName by remember { mutableStateOf("") }
     var deleteConfirmFile by remember { mutableStateOf<CanDataRepository.LogFileInfo?>(null) }
     var selectedFile by remember { mutableStateOf<CanDataRepository.LogFileInfo?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var aiLoadingFile by remember { mutableStateOf<String?>(null) }
+
+    // AI Analysis with DBC option
+    var showAiOptionsDialog by remember { mutableStateOf<CanDataRepository.LogFileInfo?>(null) }
+    var createDbcWithChat by remember { mutableStateOf(true) }
 
     val dateFormat = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -49,6 +66,7 @@ fun LogManagerScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Log Manager") },
@@ -146,7 +164,11 @@ fun LogManagerScreen(
                             logFile = logFile,
                             dateFormat = dateFormat,
                             onDelete = { deleteConfirmFile = logFile },
-                            onView = { selectedFile = logFile }
+                            onView = { selectedFile = logFile },
+                            onAiAnalyze = if (isGeminiConfigured) {
+                                { showAiOptionsDialog = logFile }
+                            } else null,
+                            isAiLoading = aiLoadingFile == logFile.name
                         )
                     }
                 }
@@ -258,6 +280,7 @@ fun LogManagerScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 400.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
                     Text(
                         content,
@@ -273,6 +296,93 @@ fun LogManagerScreen(
             }
         )
     }
+
+    // AI Analysis options dialog
+    showAiOptionsDialog?.let { file ->
+        AlertDialog(
+            onDismissRequest = {
+                showAiOptionsDialog = null
+                createDbcWithChat = true
+            },
+            title = { Text("KI-Analyse starten") },
+            text = {
+                Column {
+                    Text(
+                        "Snapshot \"${file.name}\" wird an Gemini gesendet.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Checkbox(
+                            checked = createDbcWithChat,
+                            onCheckedChange = { createDbcWithChat = it }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                "DBC-Datei erstellen",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                "Gemini kann Signale direkt in eine DBC speichern",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val selectedFile = file
+                        showAiOptionsDialog = null
+                        aiLoadingFile = selectedFile.name
+
+                        scope.launch {
+                            try {
+                                val content = DirectCanApplication.instance.contentResolver
+                                    .openInputStream(selectedFile.uri)?.bufferedReader()?.use { it.readText() }
+                                    ?: "Keine Daten"
+
+                                val chatId = if (createDbcWithChat) {
+                                    geminiRepository.createChatSessionWithDbc(
+                                        snapshotName = selectedFile.name,
+                                        snapshotData = content,
+                                        dbcRepository = dbcRepository
+                                    )
+                                } else {
+                                    geminiRepository.createChatSession(
+                                        snapshotName = selectedFile.name,
+                                        snapshotData = content
+                                    )
+                                }
+                                aiLoadingFile = null
+                                createDbcWithChat = true
+                                onNavigateToChat(chatId)
+                            } catch (e: Exception) {
+                                aiLoadingFile = null
+                                errorMessage = "Fehler: ${e.message}"
+                            }
+                        }
+                    }
+                ) {
+                    Text("Starten")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showAiOptionsDialog = null
+                    createDbcWithChat = true
+                }) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -281,7 +391,9 @@ fun LogFileCard(
     logFile: CanDataRepository.LogFileInfo,
     dateFormat: SimpleDateFormat,
     onDelete: () -> Unit,
-    onView: () -> Unit
+    onView: () -> Unit,
+    onAiAnalyze: (() -> Unit)? = null,
+    isAiLoading: Boolean = false
 ) {
     Card(
         onClick = onView,
@@ -315,6 +427,26 @@ fun LogFileCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+            // AI Analyze button
+            if (onAiAnalyze != null) {
+                IconButton(
+                    onClick = onAiAnalyze,
+                    enabled = !isAiLoading
+                ) {
+                    if (isAiLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Psychology,
+                            contentDescription = "KI-Analyse",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
             IconButton(onClick = onDelete) {
                 Icon(

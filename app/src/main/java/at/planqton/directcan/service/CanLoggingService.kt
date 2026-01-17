@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import at.planqton.directcan.DirectCanApplication
 import at.planqton.directcan.MainActivity
@@ -22,6 +23,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+private const val TAG = "CanLoggingService"
 
 class CanLoggingService : Service() {
 
@@ -56,6 +59,7 @@ class CanLoggingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.i(TAG, "Service starting...")
         val notification = createNotification()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -66,14 +70,17 @@ class CanLoggingService : Service() {
 
         _isRunning.value = true
         startLogging()
+        Log.i(TAG, "Service started successfully - Logging active")
 
         return START_STICKY
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "Service destroying...")
         super.onDestroy()
         _isRunning.value = false
         loggingJob?.cancel()
+        Log.i(TAG, "Service destroyed")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -115,17 +122,35 @@ class CanLoggingService : Service() {
         val app = DirectCanApplication.instance
         val usbManager = app.usbSerialManager
         val canDataRepository = app.canDataRepository
+        val settingsRepository = app.settingsRepository
 
         // Start hardware logging
+        Log.d(TAG, "Starting hardware logging")
         usbManager.startLogging()
         canDataRepository.setLoggingActive(true)
 
-        // Collect frames - already handled in DirectCanApplication
-        // Just keep the service running for foreground notification
+        val startTime = System.currentTimeMillis()
+
+        // Periodic status logging based on settings
         loggingJob = scope.launch {
-            // Keep alive
+            val logEnabled = settingsRepository.getDevLogEnabledSync()
+            val intervalMinutes = settingsRepository.getDevLogIntervalMinutesSync()
+            Log.i(TAG, "Status logging: enabled=$logEnabled, interval=${intervalMinutes}min")
+
             while (true) {
-                kotlinx.coroutines.delay(1000)
+                // Re-check settings each iteration (allows live changes)
+                val currentLogEnabled = settingsRepository.getDevLogEnabledSync()
+                val currentIntervalMinutes = settingsRepository.getDevLogIntervalMinutesSync()
+
+                kotlinx.coroutines.delay(currentIntervalMinutes * 60 * 1000L)
+
+                if (currentLogEnabled) {
+                    val elapsedMinutes = (System.currentTimeMillis() - startTime) / 60000
+                    val frameCount = canDataRepository.currentFrames.value.size
+                    val totalCaptured = canDataRepository.totalFramesCaptured.value
+
+                    Log.i(TAG, "Still Capturing - $frameCount unique IDs, $totalCaptured total frames - Capturing since $elapsedMinutes minutes")
+                }
             }
         }
     }
