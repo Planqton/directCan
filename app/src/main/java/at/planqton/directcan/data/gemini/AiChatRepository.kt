@@ -11,6 +11,7 @@ import com.google.ai.client.generativeai.type.content
 import com.google.ai.client.generativeai.type.generationConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -77,6 +78,7 @@ class AiChatRepository(private val context: Context) {
         val CHAT_SESSIONS = stringPreferencesKey("gemini_chat_sessions")
         val ACTIVE_CHAT_ID = stringPreferencesKey("gemini_active_chat_id")
         val DELTA_MODE = booleanPreferencesKey("gemini_delta_mode")
+        val AI_TIMEOUT_SECONDS = intPreferencesKey("ai_timeout_seconds")
     }
 
     // Current AI provider
@@ -140,9 +142,24 @@ class AiChatRepository(private val context: Context) {
     // Delta Mode - compress snapshots to only show changes
     val deltaMode: Flow<Boolean> = context.aiChatDataStore.data.map { it[Keys.DELTA_MODE] ?: false }
 
+    // AI Timeout in seconds (default: 120s = 2 minutes)
+    val aiTimeout: Flow<Int> = context.aiChatDataStore.data.map { it[Keys.AI_TIMEOUT_SECONDS] ?: 120 }
+
+    suspend fun setAiTimeout(seconds: Int) {
+        context.aiChatDataStore.edit { it[Keys.AI_TIMEOUT_SECONDS] = seconds }
+    }
+
+    fun getAiTimeoutSync(): Int {
+        return runBlocking { aiTimeout.first() }
+    }
+
     suspend fun setProvider(providerType: AiProviderType) {
         Log.i(TAG, "Setting provider: $providerType")
-        context.aiChatDataStore.edit { it[Keys.PROVIDER] = providerType.name }
+        context.aiChatDataStore.edit {
+            it[Keys.PROVIDER] = providerType.name
+            // Clear selected model when provider changes to avoid invalid combinations
+            it.remove(Keys.SELECTED_MODEL)
+        }
         _currentProvider.value = providerType
         // Clear models and reload for new provider
         _availableModels.value = emptyList()
@@ -598,7 +615,8 @@ class AiChatRepository(private val context: Context) {
         chatId: String,
         userMessage: String,
         skipSnapshot: Boolean = false,
-        requestDbcUpdate: Boolean = false
+        requestDbcUpdate: Boolean = false,
+        independentMode: Boolean = false
     ): String? {
         val session = _chatSessions.value.find { it.id == chatId } ?: return null
 
@@ -650,13 +668,27 @@ class AiChatRepository(private val context: Context) {
 
             // System context with snapshot data and DBC context
             val systemPrompt = buildString {
-                appendLine("Du bist ein CAN-Bus Analyse-Assistent.")
-
-                if (skipSnapshot) {
-                    appendLine("Beantworte die Frage des Benutzers ohne auf spezifische Snapshot-Daten einzugehen.")
-                    appendLine("Dies ist eine allgemeine Frage.")
+                if (independentMode) {
+                    // Completely independent mode - no app context at all
+                    appendLine("Du bist ein freundlicher und hilfreicher KI-Assistent.")
+                    appendLine("Du hast KEINEN speziellen Kontext zu CAN-Bus, Fahrzeugen oder dieser App.")
+                    appendLine("Beantworte alle Fragen wie ein allgemeiner Assistent (ähnlich ChatGPT).")
                     appendLine()
+                    appendLine("STIL:")
+                    appendLine("- Sei freundlich, hilfsbereit und gesprächig.")
+                    appendLine("- Erkläre Dinge verständlich und gib bei Bedarf zusätzliche Infos.")
+                    appendLine("- Bei Rechenaufgaben: Zeige den Rechenweg und erkläre das Ergebnis.")
+                    appendLine("- Bei Wissensfragen: Gib informative und interessante Antworten.")
+                    appendLine("- Antworte in der Sprache des Benutzers (Deutsch oder Englisch).")
+                    appendLine("- Sei nicht roboterhaft oder zu knapp - antworte natürlich und menschlich.")
                 } else {
+                    appendLine("Du bist ein CAN-Bus Analyse-Assistent.")
+
+                    if (skipSnapshot) {
+                        appendLine("Beantworte die Frage des Benutzers ohne auf spezifische Snapshot-Daten einzugehen.")
+                        appendLine("Dies ist eine allgemeine Frage.")
+                        appendLine()
+                    } else {
                     appendLine("Der Benutzer hat einen Snapshot von CAN-Bus Frames, den du analysieren sollst.")
                     appendLine()
                     appendLine("SNAPSHOT DATEN (${session.snapshotName}):")
@@ -709,6 +741,7 @@ class AiChatRepository(private val context: Context) {
                 appendLine("- Keine Floskeln, keine Höflichkeitsphrasen.")
                 appendLine("- Komm direkt zum Punkt.")
                 appendLine("- Antworte in der Sprache des Benutzers (Deutsch oder Englisch).")
+                } // end else independentMode
             }
 
             // Build message history
@@ -727,8 +760,9 @@ class AiChatRepository(private val context: Context) {
 
             // Use the provider abstraction
             val provider = AiProviderFactory.getProvider(providerType)
+            val timeoutMs = getAiTimeoutSync() * 1000  // Convert seconds to milliseconds
             val result = withContext(Dispatchers.IO) {
-                provider.generateContent(key, modelId, messages, systemPrompt)
+                provider.generateContent(key, modelId, messages, systemPrompt, timeoutMs)
             }
 
             val responseText = when (result) {
@@ -766,6 +800,41 @@ class AiChatRepository(private val context: Context) {
             context.aiChatDataStore.edit { it.remove(Keys.ACTIVE_CHAT_ID) }
         }
         saveChatSessions()
+    }
+
+    /**
+     * Delete chats older than specified time.
+     * @param maxAgeMinutes Maximum age in minutes (0 = delete all)
+     * @return Number of deleted chats
+     */
+    suspend fun deleteOldChats(maxAgeMinutes: Int): Int {
+        val now = System.currentTimeMillis()
+        val maxAgeMs = maxAgeMinutes * 60 * 1000L
+
+        val toDelete = if (maxAgeMinutes == 0) {
+            // Delete all
+            _chatSessions.value
+        } else {
+            // Delete chats where last message is older than maxAge
+            _chatSessions.value.filter { session ->
+                val lastMessageTime = session.messages.lastOrNull()?.timestamp ?: session.createdAt
+                (now - lastMessageTime) > maxAgeMs
+            }
+        }
+
+        val deletedCount = toDelete.size
+        if (deletedCount > 0) {
+            Log.i(TAG, "Deleting $deletedCount old chat sessions (maxAge: ${maxAgeMinutes}min)")
+            val toDeleteIds = toDelete.map { it.id }.toSet()
+            _chatSessions.value = _chatSessions.value.filter { it.id !in toDeleteIds }
+
+            if (_activeChatId.value in toDeleteIds) {
+                _activeChatId.value = null
+                context.aiChatDataStore.edit { it.remove(Keys.ACTIVE_CHAT_ID) }
+            }
+            saveChatSessions()
+        }
+        return deletedCount
     }
 
     suspend fun updateSnapshotData(chatId: String, newSnapshotData: String) {

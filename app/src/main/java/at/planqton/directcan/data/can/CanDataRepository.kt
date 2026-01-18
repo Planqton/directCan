@@ -41,6 +41,10 @@ class CanDataRepository(private val context: Context) {
     private val monitorIdPortIndex = mutableMapOf<Long, Int>()
     private var _overwriteMode = true
 
+    // Frame history for analysis (keeps ALL frames, independent of overwrite mode)
+    private val frameHistory = Collections.synchronizedList(mutableListOf<CanFrame>())
+    private val maxHistorySize = 10000
+
     // Helper to create unique key from ID and port
     private fun makeIdPortKey(id: Long, port: Int): Long = id * 10 + port
 
@@ -159,6 +163,26 @@ class CanDataRepository(private val context: Context) {
     fun setOverwriteMode(enabled: Boolean) {
         Log.d(TAG, "Overwrite mode set to: $enabled")
         _overwriteMode = enabled
+    }
+
+    /**
+     * Get all frames for a specific CAN ID from history
+     */
+    fun getFrameHistoryForId(canId: Long): List<CanFrame> {
+        // Must synchronize on the list to safely iterate
+        synchronized(frameHistory) {
+            return frameHistory.filter { it.id == canId }
+        }
+    }
+
+    /**
+     * Clear frame history
+     */
+    fun clearFrameHistory() {
+        Log.d(TAG, "Clearing frame history")
+        synchronized(frameHistory) {
+            frameHistory.clear()
+        }
     }
 
     /**
@@ -300,6 +324,14 @@ class CanDataRepository(private val context: Context) {
     }
 
     private fun updateMonitorFrame(frame: CanFrame) {
+        // Add to history (always, for analysis) - synchronized
+        synchronized(frameHistory) {
+            frameHistory.add(frame)
+            if (frameHistory.size > maxHistorySize) {
+                frameHistory.removeAt(0)
+            }
+        }
+
         if (_overwriteMode) {
             // Use combined key of ID + port so same ID on different ports shows separately
             val key = makeIdPortKey(frame.id, frame.port)
@@ -374,9 +406,12 @@ class CanDataRepository(private val context: Context) {
     }
 
     fun clearMonitorFrames() {
-        Log.d(TAG, "Clearing monitor frames (was ${monitorFrameBuffer.size} frames)")
+        Log.d(TAG, "Clearing monitor frames (was ${monitorFrameBuffer.size} frames, history: ${frameHistory.size})")
         monitorFrameBuffer.clear()
         monitorIdPortIndex.clear()
+        synchronized(frameHistory) {
+            frameHistory.clear()
+        }
         _monitorFrames.value = emptyList()
         _totalFramesCaptured.value = 0
     }

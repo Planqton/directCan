@@ -61,12 +61,14 @@ fun AiSettingsScreen(
     val error by aiRepository.error.collectAsState()
     val chatSessions by aiRepository.chatSessions.collectAsState()
     val deltaMode by aiRepository.deltaMode.collectAsState(initial = false)
+    val aiTimeout by aiRepository.aiTimeout.collectAsState(initial = 120)
 
     var showProviderDialog by remember { mutableStateOf(false) }
     var showApiKeyDialog by remember { mutableStateOf(false) }
     var showModelDialog by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf<Boolean?>(null) }
     var showDeleteChatDialog by remember { mutableStateOf<String?>(null) }
+    var showDeleteOldChatsDialog by remember { mutableStateOf(false) }
 
     // Export state
     var showExportAllDialog by remember { mutableStateOf(false) }
@@ -291,6 +293,69 @@ fun AiSettingsScreen(
                 }
             }
 
+            // AI Timeout Setting
+            item {
+                var showTimeoutMenu by remember { mutableStateOf(false) }
+                val timeoutOptions = listOf(
+                    30 to "30 Sekunden",
+                    60 to "1 Minute",
+                    120 to "2 Minuten",
+                    180 to "3 Minuten",
+                    300 to "5 Minuten"
+                )
+                val currentTimeoutLabel = timeoutOptions.find { it.first == aiTimeout }?.second ?: "$aiTimeout Sek."
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { showTimeoutMenu = true }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Timer,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("AI Timeout", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                currentTimeoutLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = null)
+                    }
+                }
+
+                DropdownMenu(
+                    expanded = showTimeoutMenu,
+                    onDismissRequest = { showTimeoutMenu = false }
+                ) {
+                    timeoutOptions.forEach { (seconds, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                scope.launch {
+                                    aiRepository.setAiTimeout(seconds)
+                                }
+                                showTimeoutMenu = false
+                            },
+                            leadingIcon = {
+                                if (seconds == aiTimeout) {
+                                    Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
             // Test Connection & Test Chat Buttons
             item {
                 Row(
@@ -410,6 +475,17 @@ fun AiSettingsScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f)
                         )
+                        // Delete old chats button
+                        TextButton(
+                            onClick = { showDeleteOldChatsDialog = true },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Icon(Icons.Default.DeleteSweep, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Aufräumen")
+                        }
                         // Export all chats button
                         Box {
                             TextButton(onClick = { showExportMenu = true }) {
@@ -542,8 +618,9 @@ fun AiSettingsScreen(
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Um die AI-Analyse zu nutzen, benötigen Sie einen Google Gemini API-Key. " +
-                                        "Diesen erhalten Sie unter ai.google.dev.",
+                                "Verschiedene AI-Provider werden unterstützt: Google Gemini, OpenAI, " +
+                                        "Anthropic, OpenRouter und OpenCode Zen. Für kostenlose Nutzung " +
+                                        "empfehlen wir OpenCode Zen mit dem BigPickle-Modell - kein API-Key erforderlich!",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -754,6 +831,90 @@ fun AiSettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteChatDialog = null }) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
+
+    // Delete Old Chats Dialog
+    if (showDeleteOldChatsDialog) {
+        var selectedTimeFilter by remember { mutableStateOf(-1) }  // -1 = not selected
+        val timeOptions = listOf(
+            10 to "10 Minuten",
+            30 to "30 Minuten",
+            60 to "1 Stunde",
+            360 to "6 Stunden",
+            1440 to "24 Stunden",
+            0 to "Alle löschen"
+        )
+
+        AlertDialog(
+            onDismissRequest = { showDeleteOldChatsDialog = false },
+            icon = {
+                Icon(
+                    Icons.Default.DeleteSweep,
+                    null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+            },
+            title = { Text("Alte Chats löschen") },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "Chats löschen, deren letzte Nachricht älter ist als:",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    timeOptions.forEach { (minutes, label) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedTimeFilter = minutes }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedTimeFilter == minutes,
+                                onClick = { selectedTimeFilter = minutes }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                label,
+                                color = if (minutes == 0) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (selectedTimeFilter >= 0) {
+                            scope.launch {
+                                val deleted = aiRepository.deleteOldChats(selectedTimeFilter)
+                                showDeleteOldChatsDialog = false
+                                Toast.makeText(
+                                    context,
+                                    "$deleted Chat(s) gelöscht",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    },
+                    enabled = selectedTimeFilter >= 0,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Löschen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteOldChatsDialog = false }) {
                     Text("Abbrechen")
                 }
             }

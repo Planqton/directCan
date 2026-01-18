@@ -66,7 +66,8 @@ interface AiProvider {
         apiKey: String,
         model: String,
         messages: List<AiMessage>,
-        systemPrompt: String? = null
+        systemPrompt: String? = null,
+        timeoutMs: Int = 120000  // Default: 2 minutes
     ): AiResult
 }
 
@@ -122,13 +123,16 @@ class GeminiProvider : AiProvider {
         apiKey: String,
         model: String,
         messages: List<AiMessage>,
-        systemPrompt: String?
+        systemPrompt: String?,
+        timeoutMs: Int
     ): AiResult {
         return try {
             val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey")
             val connection = url.openConnection() as HttpURLConnection
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
+            connection.connectTimeout = 30000
+            connection.readTimeout = timeoutMs
             connection.doOutput = true
 
             // Build contents array
@@ -260,7 +264,8 @@ class OpenAiProvider : AiProvider {
         apiKey: String,
         model: String,
         messages: List<AiMessage>,
-        systemPrompt: String?
+        systemPrompt: String?,
+        timeoutMs: Int
     ): AiResult {
         return try {
             val url = URL("https://api.openai.com/v1/chat/completions")
@@ -268,6 +273,8 @@ class OpenAiProvider : AiProvider {
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("Authorization", "Bearer $apiKey")
+            connection.connectTimeout = 30000
+            connection.readTimeout = timeoutMs
             connection.doOutput = true
 
             val messagesArray = buildJsonArray {
@@ -359,7 +366,8 @@ class AnthropicProvider : AiProvider {
         apiKey: String,
         model: String,
         messages: List<AiMessage>,
-        systemPrompt: String?
+        systemPrompt: String?,
+        timeoutMs: Int
     ): AiResult {
         return try {
             val url = URL("https://api.anthropic.com/v1/messages")
@@ -368,6 +376,8 @@ class AnthropicProvider : AiProvider {
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("x-api-key", apiKey)
             connection.setRequestProperty("anthropic-version", "2023-06-01")
+            connection.connectTimeout = 30000
+            connection.readTimeout = timeoutMs
             connection.doOutput = true
 
             val messagesArray = buildJsonArray {
@@ -492,7 +502,8 @@ class OpenRouterProvider : AiProvider {
         apiKey: String,
         model: String,
         messages: List<AiMessage>,
-        systemPrompt: String?
+        systemPrompt: String?,
+        timeoutMs: Int
     ): AiResult {
         return try {
             val url = URL("https://openrouter.ai/api/v1/chat/completions")
@@ -502,6 +513,8 @@ class OpenRouterProvider : AiProvider {
             connection.setRequestProperty("Authorization", "Bearer $apiKey")
             connection.setRequestProperty("HTTP-Referer", "https://directcan.app")
             connection.setRequestProperty("X-Title", "DirectCAN")
+            connection.connectTimeout = 30000
+            connection.readTimeout = timeoutMs
             connection.doOutput = true
 
             val messagesArray = buildJsonArray {
@@ -618,7 +631,8 @@ class OpenCodeZenProvider : AiProvider {
         apiKey: String,
         model: String,
         messages: List<AiMessage>,
-        systemPrompt: String?
+        systemPrompt: String?,
+        timeoutMs: Int
     ): AiResult {
         return try {
             val url = URL("https://opencode.ai/zen/v1/chat/completions")
@@ -626,7 +640,7 @@ class OpenCodeZenProvider : AiProvider {
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
             connection.connectTimeout = 30000
-            connection.readTimeout = 120000
+            connection.readTimeout = timeoutMs
             // API key is optional for free models
             if (apiKey.isNotBlank()) {
                 connection.setRequestProperty("Authorization", "Bearer $apiKey")

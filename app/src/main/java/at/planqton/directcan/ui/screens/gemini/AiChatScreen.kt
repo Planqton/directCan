@@ -45,6 +45,7 @@ fun AiChatScreen(
 ) {
     val aiRepository = DirectCanApplication.instance.aiChatRepository
     val dbcRepository = DirectCanApplication.instance.dbcRepository
+    val canDataRepository = DirectCanApplication.instance.canDataRepository
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -89,6 +90,7 @@ fun AiChatScreen(
     val dateFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     var showChatSwitcher by remember { mutableStateOf(false) }
     var showSendOptions by remember { mutableStateOf(false) }
+    var showDeleteChatDialog by remember { mutableStateOf(false) }
 
     // Response parser for DBC commands
     val responseParser = remember { GeminiResponseParser() }
@@ -262,6 +264,20 @@ fun AiChatScreen(
                                     }
                                 }
                             )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Chat löschen", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Delete, null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                },
+                                onClick = {
+                                    showExportMenu = false
+                                    showDeleteChatDialog = true
+                                }
+                            )
                         }
                     }
 
@@ -359,6 +375,47 @@ fun AiChatScreen(
                 },
                 dismissButton = {
                     TextButton(onClick = { showExportDialog = false }) {
+                        Text("Abbrechen")
+                    }
+                }
+            )
+        }
+
+        // Delete Chat Confirmation Dialog
+        if (showDeleteChatDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteChatDialog = false },
+                icon = {
+                    Icon(
+                        Icons.Default.Delete,
+                        null,
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                },
+                title = { Text("Chat löschen?") },
+                text = {
+                    Text("Möchten Sie diesen Chat \"${currentSession?.snapshotName}\" wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.")
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                aiRepository.deleteChatSession(chatId)
+                                showDeleteChatDialog = false
+                                onNavigateBack()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Löschen")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteChatDialog = false }) {
                         Text("Abbrechen")
                     }
                 }
@@ -525,7 +582,8 @@ fun AiChatScreen(
                             enabled = !isLoading
                         )
                         Spacer(Modifier.width(8.dp))
-                        // Options dropdown button
+
+                        // Options dropdown button (3-dot menu)
                         Box {
                             IconButton(
                                 onClick = { showSendOptions = true },
@@ -537,6 +595,59 @@ fun AiChatScreen(
                                 expanded = showSendOptions,
                                 onDismissRequest = { showSendOptions = false }
                             ) {
+                                // Send with updated/current snapshot
+                                DropdownMenuItem(
+                                    text = { Text("Mit aktuellem Snapshot") },
+                                    leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                                    onClick = {
+                                        showSendOptions = false
+                                        if (messageInput.isNotBlank() && !isLoading) {
+                                            val message = messageInput
+                                            messageInput = ""
+                                            scope.launch {
+                                                // Capture current CAN data
+                                                val snapshot = canDataRepository.captureSnapshot()
+
+                                                // Format snapshot as text
+                                                val sb = StringBuilder()
+                                                sb.appendLine("=== AKTUELLER SNAPSHOT ===")
+                                                sb.appendLine("Time: ${java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date(snapshot.captureTime))}")
+                                                sb.appendLine("Frames: ${snapshot.frames.size}")
+                                                sb.appendLine("---")
+                                                snapshot.frames.entries.sortedBy { it.key }.forEach { (id, data) ->
+                                                    val idHex = "0x${id.toString(16).uppercase().padStart(3, '0')}"
+                                                    val dataHex = data.data.joinToString(" ") {
+                                                        it.toInt().and(0xFF).toString(16).uppercase().padStart(2, '0')
+                                                    }
+                                                    val ascii = data.data.map { b ->
+                                                        val c = b.toInt().and(0xFF)
+                                                        if (c in 32..126) c.toChar() else '.'
+                                                    }.joinToString("")
+                                                    sb.appendLine("$idHex [${data.data.size}] $dataHex | $ascii")
+                                                }
+                                                sb.appendLine("=== END SNAPSHOT ===")
+
+                                                // Update snapshot in chat session
+                                                aiRepository.updateSnapshotData(chatId, sb.toString())
+
+                                                // Send message with updated snapshot
+                                                val response = aiRepository.sendMessage(chatId, message)
+
+                                                if (response != null && linkedDbcInfo != null) {
+                                                    val parsed = responseParser.parseResponse(response)
+                                                    if (parsed.hasCommands) {
+                                                        aiRepository.executeDbcCommands(
+                                                            linkedDbcInfo,
+                                                            parsed.dbcCommands,
+                                                            dbcRepository
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                )
+                                HorizontalDivider()
                                 DropdownMenuItem(
                                     text = { Text("DBC erstellen") },
                                     leadingIcon = { Icon(Icons.Default.Storage, null) },
@@ -579,6 +690,25 @@ fun AiChatScreen(
                                                     chatId, message,
                                                     skipSnapshot = true,
                                                     requestDbcUpdate = false
+                                                )
+                                            }
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Unabhängige Antwort") },
+                                    leadingIcon = { Icon(Icons.Default.Public, null) },
+                                    onClick = {
+                                        showSendOptions = false
+                                        if (messageInput.isNotBlank() && !isLoading) {
+                                            val message = messageInput
+                                            messageInput = ""
+                                            scope.launch {
+                                                aiRepository.sendMessage(
+                                                    chatId, message,
+                                                    skipSnapshot = true,
+                                                    requestDbcUpdate = false,
+                                                    independentMode = true
                                                 )
                                             }
                                         }

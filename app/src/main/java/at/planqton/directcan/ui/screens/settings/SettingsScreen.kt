@@ -76,6 +76,10 @@ fun SettingsScreen(
     var showPort1ColorPicker by remember { mutableStateOf(false) }
     var showPort2ColorPicker by remember { mutableStateOf(false) }
 
+    // ISO-TP highlight color
+    val isoTpHighlightColor by settingsRepository.isoTpHighlightColor.collectAsState(initial = SettingsRepository.DEFAULT_ISO_TP_HIGHLIGHT_COLOR)
+    var showIsoTpColorPicker by remember { mutableStateOf(false) }
+
     // Folder picker launcher
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -190,6 +194,18 @@ fun SettingsScreen(
                     port = 2,
                     color = Color(port2Color.toInt()),
                     onClick = { showPort2ColorPicker = true }
+                )
+            }
+
+            // Monitor Settings Section
+            item {
+                SettingsSectionHeader("Monitor")
+            }
+
+            item {
+                IsoTpColorSettingsItem(
+                    color = Color(isoTpHighlightColor.toInt()),
+                    onClick = { showIsoTpColorPicker = true }
                 )
             }
 
@@ -404,6 +420,18 @@ fun SettingsScreen(
                 showPort2ColorPicker = false
             },
             onDismiss = { showPort2ColorPicker = false }
+        )
+    }
+
+    // ISO-TP Color Picker Dialog
+    if (showIsoTpColorPicker) {
+        IsoTpColorPickerDialog(
+            currentColor = Color(isoTpHighlightColor.toInt()),
+            onColorSelected = { color ->
+                scope.launch { settingsRepository.setIsoTpHighlightColor(color.value.toLong()) }
+                showIsoTpColorPicker = false
+            },
+            onDismiss = { showIsoTpColorPicker = false }
         )
     }
 }
@@ -737,6 +765,108 @@ fun PortColorPickerDialog(
         title = { Text("Port $port Farbe wählen") },
         text = {
             Column {
+                colors.chunked(4).forEach { row ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        row.forEach { (color, _) ->
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(color, CircleShape)
+                                    .then(
+                                        if (color == currentColor) {
+                                            Modifier.border(
+                                                width = 3.dp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                shape = CircleShape
+                                            )
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .clickable { onColorSelected(color) }
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Abbrechen")
+            }
+        }
+    )
+}
+
+@Composable
+fun IsoTpColorSettingsItem(
+    color: Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Color preview box
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(color, RoundedCornerShape(8.dp))
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("ISO-TP Highlight", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Farbe für ISO-TP Frames im Monitor",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun IsoTpColorPickerDialog(
+    currentColor: Color,
+    onColorSelected: (Color) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = listOf(
+        Color(0xFFFF9800) to "Orange",
+        Color(0xFF4CAF50) to "Grün",
+        Color(0xFF2196F3) to "Blau",
+        Color(0xFF9C27B0) to "Lila",
+        Color(0xFFF44336) to "Rot",
+        Color(0xFF00BCD4) to "Cyan",
+        Color(0xFFFFEB3B) to "Gelb",
+        Color(0xFF795548) to "Braun"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ISO-TP Highlight Farbe") },
+        text = {
+            Column {
+                Text(
+                    "ISO-TP Frames (Single, First, Consecutive, Flow Control) werden mit dieser Farbe markiert.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
                 colors.chunked(4).forEach { row ->
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),

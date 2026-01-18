@@ -37,12 +37,15 @@ class SettingsRepository(private val context: Context) {
         // Port colors (stored as ARGB Long)
         val PORT_1_COLOR = longPreferencesKey("port_1_color")
         val PORT_2_COLOR = longPreferencesKey("port_2_color")
+        // ISO-TP highlighting
+        val ISO_TP_HIGHLIGHT_COLOR = longPreferencesKey("iso_tp_highlight_color")
     }
 
     // Default port colors
     companion object {
         const val DEFAULT_PORT_1_COLOR = 0xFF4CAF50L  // Green
         const val DEFAULT_PORT_2_COLOR = 0xFF2196F3L  // Blue
+        const val DEFAULT_ISO_TP_HIGHLIGHT_COLOR = 0xFFFF9800L  // Orange
     }
 
     // Language setting: "system", "en", "de"
@@ -206,4 +209,13 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun getPort1ColorSync(): Long = context.dataStore.data.first()[Keys.PORT_1_COLOR] ?: DEFAULT_PORT_1_COLOR
     suspend fun getPort2ColorSync(): Long = context.dataStore.data.first()[Keys.PORT_2_COLOR] ?: DEFAULT_PORT_2_COLOR
+
+    // ISO-TP highlight color
+    val isoTpHighlightColor: Flow<Long> = context.dataStore.data.map {
+        it[Keys.ISO_TP_HIGHLIGHT_COLOR] ?: DEFAULT_ISO_TP_HIGHLIGHT_COLOR
+    }
+
+    suspend fun setIsoTpHighlightColor(color: Long) {
+        context.dataStore.edit { it[Keys.ISO_TP_HIGHLIGHT_COLOR] = color }
+    }
 }

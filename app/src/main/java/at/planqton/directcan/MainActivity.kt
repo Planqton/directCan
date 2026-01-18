@@ -805,7 +805,7 @@ fun BottomNavBar(
     val navItems = if (hasActiveChat) Screen.bottomNavItemsWithAiChat else Screen.bottomNavItems
 
     NavigationBar(
-        modifier = Modifier.height(56.dp),
+        modifier = Modifier.navigationBarsPadding(),
         tonalElevation = 2.dp
     ) {
         navItems.forEach { screen ->

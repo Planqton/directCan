@@ -54,8 +54,9 @@ sealed class Screen(
 
     companion object {
         // Snapshot button after Settings - no navigation, just action
-        val bottomNavItems = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, Snapshot)
+        // Sniffer, Signals, SignalGraph are hidden - accessible from Monitor
+        val bottomNavItems = listOf(Home, Monitor, DbcManager, Settings, Snapshot)
         // Items including AI Chat
-        val bottomNavItemsWithAiChat = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, ActiveAiChat, Snapshot)
+        val bottomNavItemsWithAiChat = listOf(Home, Monitor, DbcManager, Settings, ActiveAiChat, Snapshot)
     }
 }

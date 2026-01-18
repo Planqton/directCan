@@ -1,4 +1,4 @@
-VERSION ""
+VERSION "1.0 - CAN Simulator mit OBD-II"
 
 NS_ :
 	NS_DESC_
@@ -28,100 +28,148 @@ NS_ :
 
 BS_:
 
-BU_: Simulator ECU BCM Cluster
+BU_: Simulator ECU BCM Cluster SteeringWheel Tester
 
 BO_ 201 EngineRPM: 8 ECU
- SG_ RPM : 0|16@1+ (0.25,0) [0|16383.75] "rpm" Cluster
- SG_ EngineRunning : 16|1@1+ (1,0) [0|1] "" Cluster
+ SG_ RPM : 0|16@0+ (0.25,0) [0|16383.75] "rpm" Cluster
 
 BO_ 180 VehicleSpeed: 8 ECU
- SG_ Speed : 8|16@1+ (0.01,0) [0|655.35] "km/h" Cluster
- SG_ SpeedValid : 0|1@1+ (1,0) [0|1] "" Cluster
+ SG_ Speed : 0|16@0+ (0.01,0) [0|655.35] "km/h" Cluster
 
-BO_ 320 ThrottlePosition: 8 ECU
- SG_ Throttle : 0|8@1+ (0.392157,0) [0|100] "%" ECU
-
-BO_ 464 EngineTemperature: 8 ECU
+BO_ 496 EngineTemperature: 8 ECU
  SG_ CoolantTemp : 0|8@1+ (1,-40) [-40|215] "C" Cluster
- SG_ TempWarning : 8|1@1+ (1,0) [0|1] "" Cluster
 
-BO_ 963 OutsideTemperature: 8 BCM
+BO_ 707 OutsideTemperature: 8 BCM
  SG_ AmbientTemp : 0|8@1+ (0.5,-40) [-40|87.5] "C" Cluster
 
-BO_ 841 FuelLevel: 8 BCM
- SG_ FuelPercent : 0|8@1+ (0.392157,0) [0|100] "%" Cluster
- SG_ FuelLow : 8|1@1+ (1,0) [0|1] "" Cluster
-
-BO_ 1136 LightsStatus: 8 BCM
+BO_ 947 TurnSignals: 8 BCM
  SG_ LeftBlinker : 0|1@1+ (1,0) [0|1] "" Cluster
  SG_ RightBlinker : 1|1@1+ (1,0) [0|1] "" Cluster
- SG_ Headlights : 2|1@1+ (1,0) [0|1] "" Cluster
- SG_ HighBeam : 3|1@1+ (1,0) [0|1] "" Cluster
- SG_ HazardLights : 4|1@1+ (1,0) [0|1] "" Cluster
- SG_ FogLights : 5|1@1+ (1,0) [0|1] "" Cluster
- SG_ ParkingLights : 6|1@1+ (1,0) [0|1] "" Cluster
 
 BO_ 416 BrakeStatus: 8 ECU
  SG_ BrakePedal : 0|1@1+ (1,0) [0|1] "" Cluster
- SG_ BrakeForce : 8|8@1+ (0.392157,0) [0|100] "%" Cluster
- SG_ ABSActive : 16|1@1+ (1,0) [0|1] "" Cluster
 
-BO_ 704 DoorsStatus: 8 BCM
- SG_ DriverDoor : 0|1@1+ (1,0) [0|1] "" Cluster
- SG_ PassengerDoor : 1|1@1+ (1,0) [0|1] "" Cluster
- SG_ RearLeftDoor : 2|1@1+ (1,0) [0|1] "" Cluster
- SG_ RearRightDoor : 3|1@1+ (1,0) [0|1] "" Cluster
- SG_ Trunk : 4|1@1+ (1,0) [0|1] "" Cluster
- SG_ Hood : 5|1@1+ (1,0) [0|1] "" Cluster
+BO_ 401 ThrottlePosition: 8 ECU
+ SG_ Throttle : 0|8@1+ (0.4,0) [0|100] "%" ECU
 
-BO_ 501 GearStatus: 8 ECU
- SG_ CurrentGear : 0|4@1+ (1,0) [0|8] "" Cluster
- SG_ TargetGear : 4|4@1+ (1,0) [0|8] "" Cluster
- SG_ GearMode : 8|3@1+ (1,0) [0|7] "" Cluster
+BO_ 194 SteeringAngle: 8 ECU
+ SG_ SteeringAngle : 0|16@0+ (0.1,-540) [-540|540] "deg" Cluster
 
-BO_ 198 SteeringAngle: 8 ECU
- SG_ SteeringAngle : 0|16@1+ (0.1,-720) [-720|720] "deg" Cluster
- SG_ SteeringSpeed : 16|8@1+ (4,0) [0|1020] "deg/s" Cluster
+BO_ 841 FuelLevel: 8 BCM
+ SG_ FuelPercent : 0|8@1+ (1,0) [0|100] "%" Cluster
 
-BO_ 1312 BatteryVoltage: 8 BCM
- SG_ Voltage : 0|16@1+ (0.1,0) [0|25.5] "V" Cluster
- SG_ BatteryLow : 16|1@1+ (1,0) [0|1] "" Cluster
+BO_ 464 GearStatus: 8 ECU
+ SG_ CurrentGear : 0|8@1+ (1,0) [0|8] "" Cluster
 
-BO_ 1456 Odometer: 8 Cluster
- SG_ TotalKm : 0|24@1+ (0.1,0) [0|1677721.5] "km" Cluster
- SG_ TripKm : 24|16@1+ (0.1,0) [0|6553.5] "km" Cluster
+BO_ 960 BatteryVoltage: 8 BCM
+ SG_ Voltage : 0|8@1+ (0.1,0) [0|25.5] "V" Cluster
 
-CM_ BO_ 201 "Engine RPM and status from ECU";
-CM_ BO_ 180 "Vehicle speed from wheel sensors";
-CM_ BO_ 320 "Throttle pedal position";
-CM_ BO_ 464 "Engine coolant temperature";
-CM_ BO_ 963 "Outside ambient temperature";
-CM_ BO_ 841 "Fuel tank level";
-CM_ BO_ 1136 "All exterior lights status";
-CM_ BO_ 416 "Brake system status";
-CM_ BO_ 704 "Door and trunk status";
-CM_ BO_ 501 "Transmission gear information";
-CM_ BO_ 198 "Steering wheel angle and speed";
-CM_ BO_ 1312 "Battery voltage monitoring";
-CM_ BO_ 1456 "Odometer and trip counter";
+BO_ 1472 SteeringWheelButtons: 8 SteeringWheel
+ SG_ VolumeUp : 0|1@1+ (1,0) [0|1] "" Cluster
+ SG_ VolumeDown : 1|1@1+ (1,0) [0|1] "" Cluster
+ SG_ NextTrack : 2|1@1+ (1,0) [0|1] "" Cluster
+ SG_ PrevTrack : 3|1@1+ (1,0) [0|1] "" Cluster
+ SG_ Mute : 4|1@1+ (1,0) [0|1] "" Cluster
+ SG_ Source : 5|1@1+ (1,0) [0|1] "" Cluster
+ SG_ Mode : 6|1@1+ (1,0) [0|1] "" Cluster
+ SG_ NavUp : 8|1@1+ (1,0) [0|1] "" Cluster
+ SG_ NavDown : 9|1@1+ (1,0) [0|1] "" Cluster
+ SG_ NavLeft : 10|1@1+ (1,0) [0|1] "" Cluster
+ SG_ NavRight : 11|1@1+ (1,0) [0|1] "" Cluster
+ SG_ NavOK : 12|1@1+ (1,0) [0|1] "" Cluster
+ SG_ PhoneAccept : 16|1@1+ (1,0) [0|1] "" Cluster
+ SG_ PhoneReject : 17|1@1+ (1,0) [0|1] "" Cluster
+ SG_ VoiceControl : 18|1@1+ (1,0) [0|1] "" Cluster
 
-CM_ SG_ 201 RPM "Engine revolutions per minute, factor 0.25";
-CM_ SG_ 180 Speed "Vehicle speed in km/h with 0.01 resolution";
-CM_ SG_ 464 CoolantTemp "Engine coolant temperature, offset -40";
-CM_ SG_ 963 AmbientTemp "Outside temperature, offset -40, factor 0.5";
-CM_ SG_ 841 FuelPercent "Fuel tank level as percentage";
-CM_ SG_ 1456 TotalKm "Total odometer reading in km";
+BO_ 1488 CruiseControl: 8 SteeringWheel
+ SG_ CruiseOnOff : 0|1@1+ (1,0) [0|1] "" Cluster
+ SG_ CruiseSet : 1|1@1+ (1,0) [0|1] "" Cluster
+ SG_ CruiseResume : 2|1@1+ (1,0) [0|1] "" Cluster
+ SG_ CruisePlus : 3|1@1+ (1,0) [0|1] "" Cluster
+ SG_ CruiseMinus : 4|1@1+ (1,0) [0|1] "" Cluster
+ SG_ CruiseCancel : 5|1@1+ (1,0) [0|1] "" Cluster
 
-VAL_ 501 CurrentGear 0 "P" 1 "1" 2 "2" 3 "3" 4 "4" 5 "5" 6 "6" 7 "R" 8 "N" ;
-VAL_ 501 GearMode 0 "Park" 1 "Reverse" 2 "Neutral" 3 "Drive" 4 "Sport" 5 "Manual" ;
-VAL_ 1136 LeftBlinker 0 "Off" 1 "On" ;
-VAL_ 1136 RightBlinker 0 "Off" 1 "On" ;
-VAL_ 1136 Headlights 0 "Off" 1 "On" ;
-VAL_ 1136 HighBeam 0 "Off" 1 "On" ;
+BO_ 2015 OBD_Request: 8 Tester
+ SG_ Length : 0|8@1+ (1,0) [0|8] "" ECU
+ SG_ Service : 8|8@1+ (1,0) [0|255] "" ECU
+ SG_ PID : 16|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data0 : 24|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data1 : 32|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data2 : 40|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data3 : 48|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data4 : 56|8@1+ (1,0) [0|255] "" ECU
+
+BO_ 2016 OBD_Request_ECM: 8 Tester
+ SG_ Length : 0|8@1+ (1,0) [0|8] "" ECU
+ SG_ Service : 8|8@1+ (1,0) [0|255] "" ECU
+ SG_ PID : 16|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data0 : 24|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data1 : 32|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data2 : 40|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data3 : 48|8@1+ (1,0) [0|255] "" ECU
+ SG_ Data4 : 56|8@1+ (1,0) [0|255] "" ECU
+
+BO_ 2024 OBD_Response: 8 ECU
+ SG_ Length : 0|8@1+ (1,0) [0|8] "" Tester
+ SG_ Service : 8|8@1+ (1,0) [0|255] "" Tester
+ SG_ Data0 : 16|8@1+ (1,0) [0|255] "" Tester
+ SG_ Data1 : 24|8@1+ (1,0) [0|255] "" Tester
+ SG_ Data2 : 32|8@1+ (1,0) [0|255] "" Tester
+ SG_ Data3 : 40|8@1+ (1,0) [0|255] "" Tester
+ SG_ Data4 : 48|8@1+ (1,0) [0|255] "" Tester
+ SG_ Data5 : 56|8@1+ (1,0) [0|255] "" Tester
+
+CM_ BO_ 201 "Engine RPM from ECU - Big Endian, Factor 0.25";
+CM_ BO_ 180 "Vehicle speed from wheel sensors - Big Endian, Factor 0.01";
+CM_ BO_ 496 "Engine coolant temperature, Offset -40";
+CM_ BO_ 707 "Outside ambient temperature, Offset -40, Factor 0.5";
+CM_ BO_ 947 "Turn signal indicators status";
+CM_ BO_ 416 "Brake pedal pressed status";
+CM_ BO_ 401 "Throttle pedal position percentage";
+CM_ BO_ 194 "Steering wheel angle - Big Endian, Factor 0.1, Offset -540";
+CM_ BO_ 841 "Fuel tank level percentage";
+CM_ BO_ 464 "Current gear position (0=P, 1-6=Gears, 7=R, 8=N)";
+CM_ BO_ 960 "Battery voltage, Factor 0.1";
+CM_ BO_ 1472 "Steering wheel media and navigation buttons";
+CM_ BO_ 1488 "Cruise control buttons";
+CM_ BO_ 2015 "OBD-II Broadcast Request (0x7DF)";
+CM_ BO_ 2016 "OBD-II ECM Direct Request (0x7E0)";
+CM_ BO_ 2024 "OBD-II ECM Response (0x7E8) - ISO-TP";
+
+CM_ SG_ 201 RPM "Engine revolutions per minute, raw value / 4 = RPM";
+CM_ SG_ 180 Speed "Vehicle speed in km/h, raw value / 100 = km/h";
+CM_ SG_ 496 CoolantTemp "Coolant temperature, raw - 40 = Celsius";
+CM_ SG_ 707 AmbientTemp "Ambient temperature, raw / 2 - 40 = Celsius";
+CM_ SG_ 194 SteeringAngle "Steering angle, (raw - 5400) / 10 = degrees";
+CM_ SG_ 960 Voltage "Battery voltage, raw / 10 = Volts";
+CM_ SG_ 2015 Service "OBD-II Service ID: 0x03=ReadDTC, 0x04=ClearDTC, 0x09=VehicleInfo";
+CM_ SG_ 2024 Service "OBD-II Response: 0x43=DTCs, 0x44=Cleared, 0x49=VIN";
+
+VAL_ 464 CurrentGear 0 "P" 1 "1" 2 "2" 3 "3" 4 "4" 5 "5" 6 "6" 7 "R" 8 "N" ;
+VAL_ 947 LeftBlinker 0 "Off" 1 "On" ;
+VAL_ 947 RightBlinker 0 "Off" 1 "On" ;
 VAL_ 416 BrakePedal 0 "Released" 1 "Pressed" ;
-VAL_ 416 ABSActive 0 "Inactive" 1 "Active" ;
-VAL_ 704 DriverDoor 0 "Closed" 1 "Open" ;
-VAL_ 704 PassengerDoor 0 "Closed" 1 "Open" ;
-VAL_ 704 Trunk 0 "Closed" 1 "Open" ;
-VAL_ 704 Hood 0 "Closed" 1 "Open" ;
+VAL_ 1472 VolumeUp 0 "Released" 1 "Pressed" ;
+VAL_ 1472 VolumeDown 0 "Released" 1 "Pressed" ;
+VAL_ 1472 NextTrack 0 "Released" 1 "Pressed" ;
+VAL_ 1472 PrevTrack 0 "Released" 1 "Pressed" ;
+VAL_ 1472 Mute 0 "Released" 1 "Pressed" ;
+VAL_ 1472 Source 0 "Released" 1 "Pressed" ;
+VAL_ 1472 Mode 0 "Released" 1 "Pressed" ;
+VAL_ 1472 NavUp 0 "Released" 1 "Pressed" ;
+VAL_ 1472 NavDown 0 "Released" 1 "Pressed" ;
+VAL_ 1472 NavLeft 0 "Released" 1 "Pressed" ;
+VAL_ 1472 NavRight 0 "Released" 1 "Pressed" ;
+VAL_ 1472 NavOK 0 "Released" 1 "Pressed" ;
+VAL_ 1472 PhoneAccept 0 "Released" 1 "Pressed" ;
+VAL_ 1472 PhoneReject 0 "Released" 1 "Pressed" ;
+VAL_ 1472 VoiceControl 0 "Released" 1 "Pressed" ;
+VAL_ 1488 CruiseOnOff 0 "Off" 1 "On" ;
+VAL_ 1488 CruiseSet 0 "Released" 1 "Pressed" ;
+VAL_ 1488 CruiseResume 0 "Released" 1 "Pressed" ;
+VAL_ 1488 CruisePlus 0 "Released" 1 "Pressed" ;
+VAL_ 1488 CruiseMinus 0 "Released" 1 "Pressed" ;
+VAL_ 1488 CruiseCancel 0 "Released" 1 "Pressed" ;
+VAL_ 2015 Service 3 "ReadDTC" 4 "ClearDTC" 7 "ReadPendingDTC" 9 "VehicleInfo" ;
+VAL_ 2024 Service 67 "DTCResponse" 68 "ClearResponse" 73 "VehicleInfoResponse" ;
 
