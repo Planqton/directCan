@@ -741,27 +741,6 @@ fun MonitorScreen() {
                                     Spacer(Modifier.width(4.dp))
                                     Text("Import")
                                 }
-                                // DEBUG: Inject test frame directly into repository
-                                TextButton(
-                                    onClick = {
-                                        val testFrame = CanFrame(
-                                            timestamp = System.currentTimeMillis() * 1000,
-                                            id = 0x7DF,
-                                            data = byteArrayOf(0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
-                                            direction = CanFrame.Direction.TX,
-                                            port = 1
-                                        )
-                                        canDataRepository.processFrame(testFrame)
-                                        Toast.makeText(context, "Debug Frame injected!", Toast.LENGTH_SHORT).show()
-                                    },
-                                    colors = ButtonDefaults.textButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error
-                                    )
-                                ) {
-                                    Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("DEBUG")
-                                }
                             }
                             Text(
                                 "ms=0: manuell | Cnt=0: endlos",
@@ -1322,6 +1301,9 @@ fun CanFrameRow(
                     Spacer(Modifier.width(300.dp))
                 }
             }
+
+            // Spacer to push button to far right
+            Spacer(Modifier.weight(1f))
 
             // Add to Send button
             if (onAddToSend != null) {

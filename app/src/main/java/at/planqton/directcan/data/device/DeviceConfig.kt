@@ -66,26 +66,6 @@ data class UsbSlcanConfig(
 }
 
 /**
- * Configuration for the built-in simulator
- */
-@Serializable
-@SerialName("simulator")
-data class SimulatorConfig(
-    override val id: String = DeviceConfig.generateId(),
-    override val name: String = "Simulator"
-) : DeviceConfig() {
-    override val type: DeviceType = DeviceType.SIMULATOR
-
-    companion object {
-        /** Default simulator configuration */
-        val DEFAULT = SimulatorConfig(
-            id = "simulator_default",
-            name = "Fahrzeug-Simulator"
-        )
-    }
-}
-
-/**
  * Wrapper for storing multiple device configs
  */
 @Serializable

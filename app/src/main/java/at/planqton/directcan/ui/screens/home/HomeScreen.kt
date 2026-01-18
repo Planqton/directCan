@@ -1,5 +1,6 @@
 package at.planqton.directcan.ui.screens.home
 
+import android.app.Activity
 import android.content.Context
 import android.hardware.usb.UsbManager
 import androidx.compose.foundation.layout.*
@@ -7,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.CarRepair
 import androidx.compose.material3.*
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.*
@@ -24,7 +26,9 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    onNavigateToDeviceManager: () -> Unit = {}
+    onNavigateToDeviceManager: () -> Unit = {},
+    onNavigateToDtc: () -> Unit = {},
+    onCloseApp: () -> Unit = {}
 ) {
     val usbManager = DirectCanApplication.instance.usbSerialManager
     val dbcRepository = DirectCanApplication.instance.dbcRepository
@@ -42,6 +46,12 @@ fun HomeScreen(
     val activeDevices by deviceManager.activeDevices.collectAsState()
     val connectedDeviceCount by deviceManager.connectedDeviceCount.collectAsState()
     val deviceConnectionState by deviceManager.connectionState.collectAsState()
+    val activeDevice by deviceManager.activeDevice.collectAsState()
+
+    // Check for ISO-TP support
+    val slcanDevice = activeDevice as? UsbSlcanDevice
+    val capabilities by slcanDevice?.capabilities?.collectAsState() ?: remember { mutableStateOf(null) }
+    val supportsIsoTp = capabilities?.supportsIsoTp == true
 
     val scope = rememberCoroutineScope()
     var firmwareInfo by remember { mutableStateOf<String?>(null) }
@@ -65,6 +75,12 @@ fun HomeScreen(
             TopAppBar(
                 title = { Text("DirectCAN") },
                 actions = {
+                    // Serial Monitor Button - only show when connected
+                    if (deviceConnectionState == ConnectionState.CONNECTED) {
+                        IconButton(onClick = { DirectCanApplication.instance.showSerialMonitor() }) {
+                            Icon(Icons.Default.Terminal, "Serial Monitor")
+                        }
+                    }
                     IconButton(onClick = { usbManager.refreshDeviceList() }) {
                         Icon(Icons.Default.Refresh, "Aktualisieren")
                     }
@@ -102,6 +118,18 @@ fun HomeScreen(
                 DbcCard(
                     activeDbc = activeDbc?.name
                 )
+            }
+
+            // DTC/OBD2 Card - only show when device is connected
+            if (deviceConnectionState == ConnectionState.CONNECTED) {
+                item {
+                    DtcModeCard(
+                        supportsIsoTp = supportsIsoTp,
+                        firmwareName = capabilities?.name,
+                        firmwareVersion = capabilities?.version,
+                        onOpenDtc = onNavigateToDtc
+                    )
+                }
             }
 
             // Debug Card
@@ -230,9 +258,10 @@ fun HomeScreen(
                     )
                     QuickActionButton(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Build,
-                        label = "DTCs lesen",
-                        enabled = connectionState == UsbSerialManager.ConnectionState.CONNECTED
+                        icon = Icons.Default.ExitToApp,
+                        label = "App beenden",
+                        enabled = true,
+                        onClick = onCloseApp
                     )
                 }
             }
@@ -251,7 +280,6 @@ fun ConfiguredDeviceCard(
 ) {
     val icon = when (config.type) {
         DeviceType.USB_SLCAN -> Icons.Default.Usb
-        DeviceType.SIMULATOR -> Icons.Default.DirectionsCar
     }
 
     val statusColor = when (connectionState) {
@@ -503,20 +531,16 @@ private fun DeviceListItem(
     var bitrateExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(config) {
-        when (config) {
-            is UsbSlcanConfig -> {
-                while (true) {
-                    detectedDeviceName = getDetectedUsbDeviceName(context, config)
-                    kotlinx.coroutines.delay(2000) // Check every 2 seconds
-                }
+        if (config is UsbSlcanConfig) {
+            while (true) {
+                detectedDeviceName = getDetectedUsbDeviceName(context, config)
+                kotlinx.coroutines.delay(2000) // Check every 2 seconds
             }
-            else -> { /* Simulator doesn't need detection */ }
         }
     }
 
     val icon = when (config.type) {
         DeviceType.USB_SLCAN -> Icons.Default.Usb
-        DeviceType.SIMULATOR -> Icons.Default.DirectionsCar
     }
 
     val statusColor = when (connectionState) {
@@ -531,6 +555,7 @@ private fun DeviceListItem(
             .fillMaxWidth()
             .padding(vertical = 8.dp)
     ) {
+        // First row: Icon, Name + Device detection, Bitrate dropdown, Connect button
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
@@ -545,6 +570,8 @@ private fun DeviceListItem(
                 modifier = Modifier.size(24.dp)
             )
             Spacer(Modifier.width(12.dp))
+
+            // Device name and detection
             Column(modifier = Modifier.weight(1f)) {
                 // Show config name with detected device name
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -597,46 +624,8 @@ private fun DeviceListItem(
                 }
             }
 
-            when (connectionState) {
-                ConnectionState.CONNECTED -> {
-                    FilledTonalButton(onClick = onDisconnect) {
-                        Text("Trennen")
-                    }
-                }
-                ConnectionState.CONNECTING -> {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp
-                    )
-                }
-                ConnectionState.DISCONNECTED, ConnectionState.ERROR -> {
-                    if (canConnect) {
-                        Button(onClick = onConnect) {
-                            Text("Verbinden")
-                        }
-                    }
-                    // If max devices connected, show nothing (hint shown in status text)
-                }
-            }
-        }
-
-        // CAN Bitrate dropdown (only for USB SLCAN devices)
-        if (config is UsbSlcanConfig) {
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 36.dp), // Align with text (24dp icon + 12dp spacer)
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "CAN-Bitrate:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (connectionState == ConnectionState.CONNECTED)
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            // CAN Bitrate dropdown (only for USB SLCAN devices) - between name and button
+            if (config is UsbSlcanConfig) {
                 Spacer(Modifier.width(8.dp))
                 ExposedDropdownMenuBox(
                     expanded = bitrateExpanded,
@@ -645,7 +634,7 @@ private fun DeviceListItem(
                             bitrateExpanded = it
                         }
                     },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.width(130.dp)
                 ) {
                     OutlinedTextField(
                         value = standardCanBitrates.find { it.first == config.canBitrate }?.second
@@ -682,6 +671,31 @@ private fun DeviceListItem(
                             )
                         }
                     }
+                }
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            // Connect/Disconnect button
+            when (connectionState) {
+                ConnectionState.CONNECTED -> {
+                    FilledTonalButton(onClick = onDisconnect) {
+                        Text("Trennen")
+                    }
+                }
+                ConnectionState.CONNECTING -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+                ConnectionState.DISCONNECTED, ConnectionState.ERROR -> {
+                    if (canConnect) {
+                        Button(onClick = onConnect) {
+                            Text("Verbinden")
+                        }
+                    }
+                    // If max devices connected, show nothing (hint shown in status text)
                 }
             }
         }
@@ -788,6 +802,87 @@ fun ConnectionCard(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     firmwareInfo,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DtcModeCard(
+    supportsIsoTp: Boolean,
+    firmwareName: String?,
+    firmwareVersion: String?,
+    onOpenDtc: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Outlined.CarRepair,
+                    contentDescription = null,
+                    tint = if (supportsIsoTp) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "OBD2 / DTC Diagnose",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    if (supportsIsoTp) {
+                        Text(
+                            if (firmwareName != null && firmwareVersion != null)
+                                "$firmwareName v$firmwareVersion - ISO-TP verfuegbar"
+                            else "ISO-TP verfuegbar",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text(
+                            "Firmware nicht kompatibel",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+
+                if (supportsIsoTp) {
+                    Button(onClick = onOpenDtc) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("DTCs lesen")
+                    }
+                } else {
+                    // Show info icon for incompatible firmware
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = "Info",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Show hint when firmware is not compatible
+            if (!supportsIsoTp) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Fuer DTC-Diagnose wird die erweiterte DirectCAN Firmware benoetigt. " +
+                            "Diese unterstuetzt ISO-TP fuer OBD2-Kommunikation.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

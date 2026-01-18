@@ -54,8 +54,7 @@ class TxScriptExecutor(
         targetPorts = ports
 
         // Check connection
-        if (usbManager.connectionState.value != UsbSerialManager.ConnectionState.CONNECTED &&
-            !usbManager.isSimulationMode.value) {
+        if (usbManager.connectionState.value != UsbSerialManager.ConnectionState.CONNECTED) {
             val error = ScriptError(
                 line = 0,
                 message = "Nicht mit CAN-Bus verbunden",

@@ -14,9 +14,21 @@ import com.hoho.android.usbserial.driver.UsbSerialProber
 import com.hoho.android.usbserial.util.SerialInputOutputManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONObject
 import java.io.IOException
 
 private const val TAG = "UsbSlcanDevice"
+
+/**
+ * Firmware Capabilities detected via I command
+ */
+data class FirmwareCapabilities(
+    val name: String = "Unknown",
+    val version: String = "Unknown",
+    val supportsIsoTp: Boolean = false,
+    val supportsSlcan: Boolean = true
+)
 
 /**
  * USB SLCAN device implementation.
@@ -58,6 +70,10 @@ class UsbSlcanDevice(
 
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 100)
     override val errors: SharedFlow<String> = _errors.asSharedFlow()
+
+    // Firmware Capabilities
+    private val _capabilities = MutableStateFlow(FirmwareCapabilities())
+    val capabilities: StateFlow<FirmwareCapabilities> = _capabilities.asStateFlow()
 
     // Line buffer for parsing
     private val lineBuffer = StringBuilder()
@@ -221,13 +237,16 @@ class UsbSlcanDevice(
             startReading()
             _connectionState.value = ConnectionState.CONNECTED
 
-            // SLCAN: Set bitrate and open CAN
-            send("S6\r")  // 500k (default)
+            // Detect firmware capabilities first
+            detectCapabilities()
+
+            // SLCAN: Set bitrate from config and open CAN
+            setCanBitrate(config.canBitrate)
             delay(50)
             send("O\r")   // Open CAN
             delay(50)
-            send("V\r")   // Request firmware version
-            Log.i(TAG, "USB device connected successfully (SLCAN)")
+            Log.i(TAG, "USB device connected successfully (SLCAN) with ${config.canBitrate} baud CAN bitrate")
+            Log.i(TAG, "Firmware capabilities: ${_capabilities.value}")
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -393,6 +412,219 @@ class UsbSlcanDevice(
         }
         Log.d(TAG, "Sending SLCAN frame: $command")
         return send(command)
+    }
+
+    // ============== Firmware Capabilities Detection ==============
+
+    private suspend fun detectCapabilities() {
+        Log.d(TAG, "Detecting firmware capabilities...")
+
+        // Send info command
+        send("I\r")
+
+        // Wait for JSON response
+        val response = withTimeoutOrNull(500L) {
+            receivedLines.first { it.startsWith("{") }
+        }
+
+        if (response != null) {
+            try {
+                val json = JSONObject(response)
+                _capabilities.value = FirmwareCapabilities(
+                    name = json.optString("fw", "Unknown"),
+                    version = json.optString("ver", "Unknown"),
+                    supportsIsoTp = json.optBoolean("isotp", false),
+                    supportsSlcan = json.optBoolean("slcan", true)
+                )
+                Log.i(TAG, "Firmware capabilities detected: ${_capabilities.value}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to parse firmware capabilities JSON", e)
+                _capabilities.value = FirmwareCapabilities()
+            }
+        } else {
+            Log.d(TAG, "No firmware capabilities response - standard SLCAN device")
+            _capabilities.value = FirmwareCapabilities()
+        }
+    }
+
+    // ============== ISO-TP Functions ==============
+
+    /**
+     * Send ISO-TP message and wait for response.
+     * Only works if firmware supports ISO-TP (detected via I command).
+     *
+     * @param txId CAN ID to send to
+     * @param rxId CAN ID to receive from
+     * @param data Data to send (up to 4095 bytes)
+     * @param extended Use extended 29-bit CAN IDs
+     * @return Response data or null on timeout/error
+     */
+    suspend fun sendIsoTp(txId: Long, rxId: Long, data: ByteArray, extended: Boolean = false): ByteArray? {
+        if (!_capabilities.value.supportsIsoTp) {
+            Log.w(TAG, "ISO-TP not supported by firmware")
+            throw UnsupportedOperationException("Firmware unterstützt kein ISO-TP")
+        }
+
+        // Format: U<txid:3><rxid:3><len:2><data> for standard
+        // Format: W<txid:8><rxid:8><len:4><data> for extended
+        val command = if (extended) {
+            val txHex = txId.toString(16).uppercase().padStart(8, '0')
+            val rxHex = rxId.toString(16).uppercase().padStart(8, '0')
+            val lenHex = data.size.toString(16).uppercase().padStart(4, '0')
+            val dataHex = data.joinToString("") { "%02X".format(it) }
+            "W$txHex$rxHex$lenHex$dataHex\r"
+        } else {
+            val txHex = txId.toString(16).uppercase().padStart(3, '0')
+            val rxHex = rxId.toString(16).uppercase().padStart(3, '0')
+            val lenHex = data.size.toString(16).uppercase().padStart(2, '0')
+            val dataHex = data.joinToString("") { "%02X".format(it) }
+            "U$txHex$rxHex$lenHex$dataHex\r"
+        }
+
+        Log.d(TAG, "Sending ISO-TP: $command")
+        send(command)
+
+        // Wait for response (u...) or error (uERR:...)
+        return withTimeoutOrNull(2000L) {
+            receivedLines.first { it.startsWith("u") || it.startsWith("w") }.let { response ->
+                Log.d(TAG, "ISO-TP response: $response")
+                if (response.startsWith("uERR:") || response.startsWith("wERR:")) {
+                    val error = response.substringAfter(":")
+                    Log.w(TAG, "ISO-TP error: $error")
+                    null
+                } else {
+                    // Parse response: u<rxid:3><len:4><data> or w<rxid:8><len:4><data>
+                    val dataStart = if (response.startsWith("w")) 13 else 8  // w + 8 + 4 or u + 3 + 4
+                    val hexData = response.substring(dataStart)
+                    hexData.chunked(2)
+                        .filter { it.length == 2 }
+                        .map { it.toInt(16).toByte() }
+                        .toByteArray()
+                }
+            }
+        }
+    }
+
+    // ============== OBD2 Convenience Methods ==============
+
+    /**
+     * Read Diagnostic Trouble Codes (DTCs)
+     * OBD2 Service 0x03
+     */
+    suspend fun readDtcs(): Result<List<String>> {
+        return try {
+            // Send OBD2 request: Service 03 (Read DTCs)
+            val response = sendIsoTp(0x7DF, 0x7E8, byteArrayOf(0x03))
+                ?: return Result.failure(Exception("Keine Antwort vom Steuergerät"))
+
+            if (response.isEmpty()) {
+                return Result.success(emptyList())
+            }
+
+            // Check for positive response (0x43 = 0x03 + 0x40)
+            if (response.isNotEmpty() && response[0] == 0x43.toByte()) {
+                val dtcs = parseDtcResponse(response)
+                Log.i(TAG, "Read ${dtcs.size} DTCs: $dtcs")
+                Result.success(dtcs)
+            } else {
+                Result.failure(Exception("Ungültige Antwort: ${response.joinToString(" ") { "%02X".format(it) }}"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read DTCs", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Clear Diagnostic Trouble Codes (DTCs)
+     * OBD2 Service 0x04
+     */
+    suspend fun clearDtcs(): Result<Boolean> {
+        return try {
+            val response = sendIsoTp(0x7DF, 0x7E8, byteArrayOf(0x04))
+                ?: return Result.failure(Exception("Keine Antwort vom Steuergerät"))
+
+            // Check for positive response (0x44 = 0x04 + 0x40)
+            val success = response.isNotEmpty() && response[0] == 0x44.toByte()
+            Log.i(TAG, "Clear DTCs: ${if (success) "Success" else "Failed"}")
+            Result.success(success)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to clear DTCs", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Read Vehicle Identification Number (VIN)
+     * OBD2 Service 0x09 PID 0x02
+     */
+    suspend fun readVin(): Result<String> {
+        return try {
+            // Service 09, PID 02 (VIN)
+            val response = sendIsoTp(0x7DF, 0x7E8, byteArrayOf(0x09, 0x02))
+                ?: return Result.failure(Exception("Keine Antwort vom Steuergerät"))
+
+            // Response: 49 02 01 <VIN 17 bytes>
+            if (response.size >= 4 && response[0] == 0x49.toByte() && response[1] == 0x02.toByte()) {
+                // Skip header bytes (49 02 01) and get VIN
+                val vinBytes = response.drop(3).take(17).toByteArray()
+                val vin = String(vinBytes, Charsets.US_ASCII).trim()
+                Log.i(TAG, "Read VIN: $vin")
+                Result.success(vin)
+            } else {
+                Result.failure(Exception("Ungültige VIN Antwort"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read VIN", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Parse DTC response bytes into human-readable DTC codes
+     */
+    private fun parseDtcResponse(response: ByteArray): List<String> {
+        val dtcs = mutableListOf<String>()
+
+        // Skip service byte (0x43) and number of DTCs byte
+        var i = 2
+        while (i + 1 < response.size) {
+            val byte1 = response[i].toInt() and 0xFF
+            val byte2 = response[i + 1].toInt() and 0xFF
+
+            // Skip padding (00 00)
+            if (byte1 == 0 && byte2 == 0) {
+                i += 2
+                continue
+            }
+
+            // Parse DTC format: AABB where AA is first byte, BB is second byte
+            // First 2 bits of AA determine the type: P=00, C=01, B=10, U=11
+            val type = when ((byte1 shr 6) and 0x03) {
+                0 -> "P"  // Powertrain
+                1 -> "C"  // Chassis
+                2 -> "B"  // Body
+                3 -> "U"  // Network
+                else -> "P"
+            }
+
+            // Next 2 bits are first digit (0-3)
+            val digit1 = (byte1 shr 4) and 0x03
+
+            // Next 4 bits are second digit (0-F)
+            val digit2 = byte1 and 0x0F
+
+            // Third and fourth digits from second byte
+            val digit3 = (byte2 shr 4) and 0x0F
+            val digit4 = byte2 and 0x0F
+
+            val dtc = "$type${digit1}${digit2.toString(16).uppercase()}${digit3.toString(16).uppercase()}${digit4.toString(16).uppercase()}"
+            dtcs.add(dtc)
+
+            i += 2
+        }
+
+        return dtcs
     }
 
     override fun dispose() {

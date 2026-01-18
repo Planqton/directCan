@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import at.planqton.directcan.data.can.CanSimulator
 import at.planqton.directcan.DirectCanApplication
 import java.io.IOException
 import java.util.concurrent.Executors
@@ -48,12 +47,6 @@ class UsbSerialManager(private val context: Context) {
     private val executor = Executors.newSingleThreadExecutor()
 
     private val scope = CoroutineScope(Dispatchers.IO + Job())
-
-    // Simulator for demo mode - exposed for SimulatorScreen
-    val simulator = CanSimulator()
-    private var simulatorJob: Job? = null
-    private var _isSimulationMode = MutableStateFlow(false)
-    val isSimulationMode: StateFlow<Boolean> = _isSimulationMode.asStateFlow()
 
     // State flows
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -128,7 +121,7 @@ class UsbSerialManager(private val context: Context) {
         Log.d(TAG, "UsbSerialManager initialized")
     }
 
-    fun refreshDeviceList(hideSimulation: Boolean = false) {
+    fun refreshDeviceList() {
         val drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
         Log.v(TAG, "Found ${drivers.size} USB serial devices")
         val usbDevices = drivers.map { driver ->
@@ -138,88 +131,21 @@ class UsbSerialManager(private val context: Context) {
                 name = driver.device.productName ?: "Unknown Device",
                 vendorId = driver.device.vendorId,
                 productId = driver.device.productId,
-                isConnected = serialPort?.device == driver.device,
-                isSimulation = false
+                isConnected = serialPort?.device == driver.device
             )
         }
-
-        // Add simulation device at the end (unless hidden)
-        if (!hideSimulation) {
-            val simulationDevice = UsbDeviceInfo(
-                device = null,
-                driver = null,
-                name = "🚗 Simulations-Modus",
-                vendorId = 0,
-                productId = 0,
-                isConnected = _isSimulationMode.value,
-                isSimulation = true
-            )
-            _availableDevices.value = usbDevices + simulationDevice
-        } else {
-            _availableDevices.value = usbDevices
-        }
+        _availableDevices.value = usbDevices
     }
 
     fun connect(deviceInfo: UsbDeviceInfo) {
         Log.i(TAG, "Connect requested: ${deviceInfo.displayName}")
-        if (deviceInfo.isSimulation) {
-            connectToSimulation()
-        } else if (deviceInfo.device != null) {
+        if (deviceInfo.device != null) {
             if (usbManager.hasPermission(deviceInfo.device)) {
                 connectToDevice(deviceInfo.device)
             } else {
                 Log.d(TAG, "Requesting USB permission")
                 requestPermission(deviceInfo.device)
             }
-        }
-    }
-
-    private fun connectToSimulation() {
-        scope.launch {
-            try {
-                Log.i(TAG, "Connecting to simulation mode")
-                _connectionState.value = ConnectionState.CONNECTING
-                _isSimulationMode.value = true
-
-                // Load Simulation DBC if available
-                loadSimulationDbc()
-
-                // Start simulator
-                simulator.start()
-                Log.d(TAG, "Simulator started")
-
-                // Collect simulator output and forward to receivedLines
-                simulatorJob = scope.launch {
-                    simulator.simulatedLines.collect { line ->
-                        _receivedLines.emit(line)
-                    }
-                }
-
-                _connectionState.value = ConnectionState.CONNECTED
-                refreshDeviceList()
-                Log.i(TAG, "Simulation mode connected")
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Simulation connection failed", e)
-                _connectionState.value = ConnectionState.ERROR
-                _errors.emit("Simulation failed: ${e.message}")
-                _isSimulationMode.value = false
-            }
-        }
-    }
-
-    private suspend fun loadSimulationDbc() {
-        try {
-            val dbcRepository = DirectCanApplication.instance.dbcRepository
-
-            // Load Simulation DBC if it exists
-            val simulationDbc = dbcRepository.dbcFiles.value.find { it.name == "Simulation" }
-            if (simulationDbc != null) {
-                dbcRepository.loadDbc(simulationDbc)
-                Log.d(TAG, "Simulation DBC loaded")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading Simulation DBC", e)
         }
     }
 
@@ -432,14 +358,6 @@ class UsbSerialManager(private val context: Context) {
 
     fun disconnect() {
         Log.i(TAG, "Disconnecting...")
-        // Stop simulation if active
-        if (_isSimulationMode.value) {
-            Log.d(TAG, "Stopping simulation")
-            simulator.stop()
-            simulatorJob?.cancel()
-            simulatorJob = null
-            _isSimulationMode.value = false
-        }
 
         // SLCAN: Close CAN before disconnecting
         try {
@@ -492,10 +410,9 @@ class UsbSerialManager(private val context: Context) {
         val name: String,
         val vendorId: Int,
         val productId: Int,
-        val isConnected: Boolean,
-        val isSimulation: Boolean = false
+        val isConnected: Boolean
     ) {
         val displayName: String
-            get() = if (isSimulation) name else "$name (${vendorId.toString(16)}:${productId.toString(16)})"
+            get() = "$name (${vendorId.toString(16)}:${productId.toString(16)})"
     }
 }

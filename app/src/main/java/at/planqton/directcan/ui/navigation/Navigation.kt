@@ -4,9 +4,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.CarRepair
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Psychology
@@ -35,8 +35,6 @@ sealed class Screen(
     }
     // Snapshot is a special button, not a navigation destination
     object Snapshot : Screen("snapshot", "Snap", Icons.Default.CameraAlt)
-    // Simulator screen - only shown when in simulation mode
-    object Simulator : Screen("simulator", "Simulator", Icons.Default.DirectionsCar)
     // AI Chat screens
     object AiSettings : Screen("ai_settings", "AI", Icons.Default.Psychology)
     object AiChat : Screen("ai_chat/{chatId}", "AI Chat", Icons.Default.Chat) {
@@ -51,15 +49,13 @@ sealed class Screen(
     }
     // Device Manager screen (like SavvyCAN Connection Settings)
     object DeviceManager : Screen("device_manager", "Verbindungen", Icons.Default.Link)
+    // DTC/OBD2 Diagnosis screen
+    object Dtc : Screen("dtc", "DTC Diagnose", Icons.Default.CarRepair)
 
     companion object {
         // Snapshot button after Settings - no navigation, just action
         val bottomNavItems = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, Snapshot)
-        // Items including Simulator (used when in simulation mode)
-        val bottomNavItemsWithSimulator = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, Simulator, Snapshot)
         // Items including AI Chat
         val bottomNavItemsWithAiChat = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, ActiveAiChat, Snapshot)
-        // Items with both Simulator and AI Chat
-        val bottomNavItemsWithSimulatorAndAiChat = listOf(Home, Monitor, Sniffer, Signals, SignalGraph, DbcManager, Settings, Simulator, ActiveAiChat, Snapshot)
     }
 }

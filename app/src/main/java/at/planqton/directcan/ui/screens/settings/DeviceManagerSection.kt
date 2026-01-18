@@ -163,7 +163,6 @@ private fun DeviceListItem(
 ) {
     val icon = when (config.type) {
         DeviceType.USB_SLCAN -> Icons.Default.Usb
-        DeviceType.SIMULATOR -> Icons.Default.DirectionsCar
     }
 
     val statusColor = when (connectionState) {
@@ -237,18 +236,16 @@ private fun DeviceListItem(
                 }
             }
 
-            // Edit (not for simulator default)
-            if (config.id != SimulatorConfig.DEFAULT.id) {
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, "Bearbeiten")
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(
-                        Icons.Default.Delete,
-                        "Löschen",
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                }
+            // Edit and Delete buttons
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Default.Edit, "Bearbeiten")
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Default.Delete,
+                    "Löschen",
+                    tint = MaterialTheme.colorScheme.error
+                )
             }
         }
     }
@@ -282,11 +279,6 @@ private fun AddDeviceDialog(
                                 "USB SLCAN",
                                 "USB SLCAN/LAWICEL CAN Adapter"
                             )
-                            DeviceType.SIMULATOR -> Triple(
-                                Icons.Default.DirectionsCar,
-                                "Simulator",
-                                "Simulierte Fahrzeugdaten"
-                            )
                         }
 
                         ListItem(
@@ -303,12 +295,6 @@ private fun AddDeviceDialog(
                             onSave = { onAdd(it) },
                             onBack = { selectedType = null }
                         )
-                        DeviceType.SIMULATOR -> {
-                            // Simulator has no config, just add it
-                            LaunchedEffect(Unit) {
-                                onAdd(SimulatorConfig())
-                            }
-                        }
                         null -> {}
                     }
                 }
@@ -408,9 +394,6 @@ private fun EditDeviceDialog(
                     onSave = onSave,
                     onBack = onDismiss
                 )
-                is SimulatorConfig -> {
-                    Text("Simulator hat keine konfigurierbaren Einstellungen.")
-                }
             }
         },
         confirmButton = {},

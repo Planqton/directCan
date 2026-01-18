@@ -61,7 +61,6 @@ class DeviceManager(private val context: Context) {
         serializersModule = SerializersModule {
             polymorphic(DeviceConfig::class) {
                 subclass(UsbSlcanConfig::class)
-                subclass(SimulatorConfig::class)
             }
         }
     }
@@ -197,14 +196,8 @@ class DeviceManager(private val context: Context) {
                 }
             }
 
-            // Ensure simulator is always available
-            if (_deviceConfigs.value.none { it.type == DeviceType.SIMULATOR }) {
-                addDevice(SimulatorConfig.DEFAULT)
-            }
         } catch (e: Exception) {
             Log.e(TAG, "Error loading device configs", e)
-            // Add default simulator if loading fails
-            addDevice(SimulatorConfig.DEFAULT)
         }
     }
 
@@ -230,7 +223,6 @@ class DeviceManager(private val context: Context) {
     private fun createDeviceFromConfig(config: DeviceConfig): CanDevice? {
         val device = when (config) {
             is UsbSlcanConfig -> UsbSlcanDevice(context, config)
-            is SimulatorConfig -> SimulatorDevice(config)
         }
 
         _devices.value = _devices.value + (config.id to device)

@@ -50,6 +50,11 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setLanguage(lang: String) {
         context.dataStore.edit { it[Keys.LANGUAGE] = lang }
+        // Also save to SharedPreferences for synchronous access in attachBaseContext
+        context.getSharedPreferences("directcan_language", Context.MODE_PRIVATE)
+            .edit()
+            .putString("language", lang)
+            .apply()
     }
 
     suspend fun getLanguageSync(): String = context.dataStore.data.first()[Keys.LANGUAGE] ?: "system"

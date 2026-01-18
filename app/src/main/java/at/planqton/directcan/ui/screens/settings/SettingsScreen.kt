@@ -52,8 +52,6 @@ fun SettingsScreen(
     var logToFile by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
 
-    // Hide simulation mode setting
-    val hideSimulationMode by settingsRepository.hideSimulationMode.collectAsState(initial = false)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -130,21 +128,6 @@ fun SettingsScreen(
                     onCheckedChange = {
                         loopbackEnabled = it
                         usbManager.setLoopback(it)
-                    }
-                )
-            }
-
-            item {
-                SettingsSwitchItem(
-                    icon = Icons.Default.VisibilityOff,
-                    title = "Simulations-Modus ausblenden",
-                    subtitle = if (hideSimulationMode) "Wird nicht in Geräteliste angezeigt" else "Wird in Geräteliste angezeigt",
-                    checked = hideSimulationMode,
-                    onCheckedChange = {
-                        scope.launch {
-                            settingsRepository.setHideSimulationMode(it)
-                            usbManager.refreshDeviceList(it)
-                        }
                     }
                 )
             }

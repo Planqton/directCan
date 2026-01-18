@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -47,13 +48,14 @@ import at.planqton.directcan.ui.screens.monitor.MonitorScreen
 import at.planqton.directcan.ui.screens.settings.SettingsScreen
 import at.planqton.directcan.ui.screens.signals.SignalGraphScreen
 import at.planqton.directcan.ui.screens.signals.SignalViewerScreen
-import at.planqton.directcan.ui.screens.simulator.SimulatorScreen
 import at.planqton.directcan.ui.screens.sniffer.SnifferScreen
 import at.planqton.directcan.ui.screens.gemini.AiSettingsScreen
 import at.planqton.directcan.ui.screens.gemini.AiChatScreen
 import at.planqton.directcan.ui.screens.txscript.TxScriptManagerScreen
 import at.planqton.directcan.ui.screens.txscript.ScriptEditorScreen
 import at.planqton.directcan.ui.screens.device.DeviceManagerScreen
+import at.planqton.directcan.ui.screens.obd2.DtcScreen
+import at.planqton.directcan.ui.components.FloatingSerialMonitor
 import at.planqton.directcan.ui.theme.DirectCanTheme
 import at.planqton.directcan.util.LocaleHelper
 import kotlinx.coroutines.launch
@@ -62,15 +64,16 @@ import kotlinx.coroutines.runBlocking
 class MainActivity : ComponentActivity() {
 
     override fun attachBaseContext(newBase: Context) {
-        // Get saved language setting and apply locale
-        val language = runBlocking {
-            DirectCanApplication.instance.settingsRepository.getLanguageSync()
-        }
+        // Read language directly from SharedPreferences (no coroutines, no blocking)
+        // DataStore also writes to this for sync
+        val prefs = newBase.getSharedPreferences("directcan_language", Context.MODE_PRIVATE)
+        val language = prefs.getString("language", "system") ?: "system"
         val context = LocaleHelper.setLocale(newBase, language)
         super.attachBaseContext(context)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
 
         setContent {
@@ -201,13 +204,10 @@ fun MainAppContent() {
     val navController = rememberNavController()
     val context = LocalContext.current
     val activity = context as? Activity
-    val canDataRepository = DirectCanApplication.instance.canDataRepository
-    val deviceManager = DirectCanApplication.instance.deviceManager
-    val aiChatRepository = DirectCanApplication.instance.aiChatRepository
-
-    // Simulation mode state - check if active device is a Simulator
-    val activeDevice by deviceManager.activeDevice.collectAsState()
-    val isSimulationMode = activeDevice?.type == at.planqton.directcan.data.device.DeviceType.SIMULATOR
+    val app = DirectCanApplication.instance
+    val canDataRepository = app.canDataRepository
+    val deviceManager = app.deviceManager
+    val aiChatRepository = app.aiChatRepository
 
     // Active AI Chat state
     val activeChatId by aiChatRepository.activeChatId.collectAsState()
@@ -220,6 +220,10 @@ fun MainAppContent() {
     // Snapshot state
     var pendingSnapshot by remember { mutableStateOf<CanDataRepository.SnapshotData?>(null) }
     var showSnapshotDialog by remember { mutableStateOf(false) }
+
+    // Serial Monitor state
+    val serialMonitorVisible by app.serialMonitorVisible.collectAsState()
+    val serialLogs by app.serialLogs.collectAsState()
 
     // Handle back button when logging is active
     BackHandler(enabled = isLogging) {
@@ -277,7 +281,6 @@ fun MainAppContent() {
         bottomBar = {
             BottomNavBar(
                 navController = navController,
-                isSimulationMode = isSimulationMode,
                 hasActiveChat = hasActiveChat,
                 onSnapshotClick = {
                     // Capture snapshot IMMEDIATELY
@@ -307,6 +310,12 @@ fun MainAppContent() {
                 HomeScreen(
                     onNavigateToDeviceManager = {
                         navController.navigate(Screen.DeviceManager.route)
+                    },
+                    onNavigateToDtc = {
+                        navController.navigate(Screen.Dtc.route)
+                    },
+                    onCloseApp = {
+                        (context as? Activity)?.finishAffinity()
                     }
                 )
             }
@@ -358,9 +367,6 @@ fun MainAppContent() {
                     }
                 )
             }
-            composable(Screen.Simulator.route) {
-                SimulatorScreen()
-            }
             composable(Screen.AiSettings.route) {
                 AiSettingsScreen(
                     onNavigateBack = { navController.popBackStack() },
@@ -403,6 +409,11 @@ fun MainAppContent() {
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
+            composable(Screen.Dtc.route) {
+                DtcScreen(
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
         }
     }
 
@@ -435,6 +446,24 @@ fun MainAppContent() {
             }
         )
     }
+
+    // Floating Serial Monitor Overlay
+    FloatingSerialMonitor(
+        isVisible = serialMonitorVisible,
+        logs = serialLogs,
+        onSendCommand = { command -> app.sendSerialCommand(command) },
+        onClearLogs = { app.clearSerialLogs() },
+        onExport = { logText ->
+            val sendIntent = android.content.Intent().apply {
+                action = android.content.Intent.ACTION_SEND
+                putExtra(android.content.Intent.EXTRA_TEXT, logText)
+                putExtra(android.content.Intent.EXTRA_SUBJECT, "DirectCAN Serial Log")
+                type = "text/plain"
+            }
+            context.startActivity(android.content.Intent.createChooser(sendIntent, "Serial Log exportieren"))
+        },
+        onClose = { app.hideSerialMonitor() }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -765,7 +794,6 @@ fun SnapshotDialog(
 @Composable
 fun BottomNavBar(
     navController: NavHostController,
-    isSimulationMode: Boolean = false,
     hasActiveChat: Boolean = false,
     onSnapshotClick: () -> Unit,
     onAiChatClick: () -> Unit = {}
@@ -773,13 +801,8 @@ fun BottomNavBar(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    // Use different nav items based on simulation mode and active chat
-    val navItems = when {
-        isSimulationMode && hasActiveChat -> Screen.bottomNavItemsWithSimulatorAndAiChat
-        isSimulationMode -> Screen.bottomNavItemsWithSimulator
-        hasActiveChat -> Screen.bottomNavItemsWithAiChat
-        else -> Screen.bottomNavItems
-    }
+    // Use different nav items based on active chat
+    val navItems = if (hasActiveChat) Screen.bottomNavItemsWithAiChat else Screen.bottomNavItems
 
     NavigationBar(
         modifier = Modifier.height(56.dp),

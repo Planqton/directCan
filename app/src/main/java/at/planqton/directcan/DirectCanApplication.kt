@@ -14,9 +14,13 @@ import at.planqton.directcan.data.usb.UsbSerialManager
 import at.planqton.directcan.data.device.ConnectionState
 import at.planqton.directcan.data.device.DeviceManager
 import at.planqton.directcan.service.CanLoggingService
+import at.planqton.directcan.ui.components.SerialLogEntry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -48,6 +52,41 @@ class DirectCanApplication : Application() {
 
     lateinit var deviceManager: DeviceManager
         private set
+
+    // Serial Monitor State
+    private val _serialMonitorVisible = MutableStateFlow(false)
+    val serialMonitorVisible: StateFlow<Boolean> = _serialMonitorVisible.asStateFlow()
+
+    private val _serialLogs = MutableStateFlow<List<SerialLogEntry>>(emptyList())
+    val serialLogs: StateFlow<List<SerialLogEntry>> = _serialLogs.asStateFlow()
+
+    private val maxSerialLogs = 500
+
+    fun showSerialMonitor() {
+        _serialMonitorVisible.value = true
+    }
+
+    fun hideSerialMonitor() {
+        _serialMonitorVisible.value = false
+    }
+
+    fun addSerialLog(direction: SerialLogEntry.Direction, message: String) {
+        val newLog = SerialLogEntry(direction = direction, message = message)
+        _serialLogs.value = (_serialLogs.value + newLog).takeLast(maxSerialLogs)
+    }
+
+    fun clearSerialLogs() {
+        _serialLogs.value = emptyList()
+    }
+
+    fun sendSerialCommand(command: String) {
+        // Add to log as TX
+        addSerialLog(SerialLogEntry.Direction.TX, command)
+        // Send via active device
+        scope.launch {
+            deviceManager.activeDevice.value?.send("$command\r")
+        }
+    }
 
     private val scope = CoroutineScope(Dispatchers.IO + Job())
 
@@ -87,12 +126,16 @@ class DirectCanApplication : Application() {
                         Log.i(TAG, "Auto-starting logging on device connect")
                         CanLoggingService.start(this@DirectCanApplication)
                     }
+                    // Add connection info to serial monitor
+                    addSerialLog(SerialLogEntry.Direction.RX, "--- Connected ---")
                 } else if (connectionState == ConnectionState.DISCONNECTED) {
                     if (CanLoggingService.isRunning.value) {
                         Log.i(TAG, "Stopping logging due to device disconnect")
                         CanLoggingService.stop(this@DirectCanApplication)
                         canDataRepository.setLoggingActive(false)
                     }
+                    // Add disconnect info to serial monitor
+                    addSerialLog(SerialLogEntry.Direction.RX, "--- Disconnected ---")
                 }
             }
         }
@@ -118,6 +161,8 @@ class DirectCanApplication : Application() {
             Log.d(TAG, "Starting receivedLinesWithPort collector")
             deviceManager.receivedLinesWithPort.collect { (port, line) ->
                 Log.v(TAG, "Received from port $port: ${line.take(50)}")
+                // Always add to serial monitor (buffer is limited to 500)
+                addSerialLog(SerialLogEntry.Direction.RX, line)
                 CanFrame.fromTextLine(line, port)?.let { frame ->
                     Log.d(TAG, "Parsed frame: ID=${frame.idHex}, port=$port")
                     canDataRepository.processFrame(frame)

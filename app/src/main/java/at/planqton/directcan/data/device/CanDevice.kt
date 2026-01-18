@@ -7,8 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
  * Supported device types for CAN communication
  */
 enum class DeviceType {
-    USB_SLCAN,
-    SIMULATOR
+    USB_SLCAN
 }
 
 /**
@@ -23,7 +22,7 @@ enum class ConnectionState {
 
 /**
  * Common interface for all CAN device types.
- * Implementations: UsbSlcanDevice, SimulatorDevice
+ * Implementations: UsbSlcanDevice
  */
 interface CanDevice {
     /** Unique identifier for this device instance */
