@@ -28,12 +28,15 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     onNavigateToDeviceManager: () -> Unit = {},
     onNavigateToDtc: () -> Unit = {},
-    onCloseApp: () -> Unit = {}
+    onCloseApp: () -> Unit = {},
+    onOpenAiChat: ((String) -> Unit)? = null  // Opens AI chat overlay with chatId
 ) {
     val usbManager = DirectCanApplication.instance.usbSerialManager
     val dbcRepository = DirectCanApplication.instance.dbcRepository
     val canDataRepository = DirectCanApplication.instance.canDataRepository
     val deviceManager = DirectCanApplication.instance.deviceManager
+    val aiChatRepository = DirectCanApplication.instance.aiChatRepository
+    val scope = rememberCoroutineScope()
 
     val connectionState by usbManager.connectionState.collectAsState()
     val activeDbc by dbcRepository.activeDbc.collectAsState()
@@ -53,7 +56,6 @@ fun HomeScreen(
     val capabilities by slcanDevice?.capabilities?.collectAsState() ?: remember { mutableStateOf(null) }
     val supportsIsoTp = capabilities?.supportsIsoTp == true
 
-    val scope = rememberCoroutineScope()
     var firmwareInfo by remember { mutableStateOf<String?>(null) }
     var debugOutput by remember { mutableStateOf<String?>(null) }
 
@@ -258,8 +260,22 @@ fun HomeScreen(
                     )
                     QuickActionButton(
                         modifier = Modifier.weight(1f),
+                        icon = Icons.Default.Psychology,
+                        label = "KI Explore",
+                        enabled = deviceConnectionState == ConnectionState.CONNECTED && onOpenAiChat != null,
+                        onClick = {
+                            if (onOpenAiChat != null) {
+                                scope.launch {
+                                    val chatId = aiChatRepository.createExploreChatSession()
+                                    onOpenAiChat(chatId)
+                                }
+                            }
+                        }
+                    )
+                    QuickActionButton(
+                        modifier = Modifier.weight(1f),
                         icon = Icons.Default.ExitToApp,
-                        label = "App beenden",
+                        label = "Beenden",
                         enabled = true,
                         onClick = onCloseApp
                     )

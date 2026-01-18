@@ -33,7 +33,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun AiSettingsScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToChat: (String) -> Unit
+    onNavigateToChat: (String) -> Unit,
+    onOpenAiChatOverlay: ((String) -> Unit)? = null  // Opens chat as floating overlay
 ) {
     val aiRepository = DirectCanApplication.instance.aiChatRepository
     val scope = rememberCoroutineScope()
@@ -390,7 +391,12 @@ fun AiSettingsScreen(
                                     snapshotName = "API-Test",
                                     snapshotData = testData
                                 )
-                                onNavigateToChat(chatId)
+                                // Open as overlay if available
+                                if (onOpenAiChatOverlay != null) {
+                                    onOpenAiChatOverlay(chatId)
+                                } else {
+                                    onNavigateToChat(chatId)
+                                }
                             }
                         },
                         enabled = canUseAi,
@@ -554,7 +560,14 @@ fun AiSettingsScreen(
                 items(chatSessions, key = { it.id }) { session ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = { onNavigateToChat(session.id) }
+                        onClick = {
+                            // Open as overlay if available, otherwise navigate to full screen
+                            if (onOpenAiChatOverlay != null) {
+                                onOpenAiChatOverlay(session.id)
+                            } else {
+                                onNavigateToChat(session.id)
+                            }
+                        }
                     ) {
                         Row(
                             modifier = Modifier

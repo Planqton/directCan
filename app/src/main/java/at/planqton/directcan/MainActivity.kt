@@ -21,7 +21,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -51,6 +53,7 @@ import at.planqton.directcan.ui.screens.signals.SignalViewerScreen
 import at.planqton.directcan.ui.screens.sniffer.SnifferScreen
 import at.planqton.directcan.ui.screens.gemini.AiSettingsScreen
 import at.planqton.directcan.ui.screens.gemini.AiChatScreen
+import at.planqton.directcan.ui.screens.gemini.FloatingAiChatWindow
 import at.planqton.directcan.ui.screens.txscript.TxScriptManagerScreen
 import at.planqton.directcan.ui.screens.txscript.ScriptEditorScreen
 import at.planqton.directcan.ui.screens.device.DeviceManagerScreen
@@ -225,6 +228,9 @@ fun MainAppContent() {
     val serialMonitorVisible by app.serialMonitorVisible.collectAsState()
     val serialLogs by app.serialLogs.collectAsState()
 
+    // Floating AI Chat overlays state
+    var openAiChatOverlays by remember { mutableStateOf<Set<String>>(emptySet()) }
+
     // Handle back button when logging is active
     BackHandler(enabled = isLogging) {
         showExitDialog = true
@@ -277,26 +283,27 @@ fun MainAppContent() {
         )
     }
 
+    // Chat sessions for navbar
+    val chatSessions by aiChatRepository.chatSessions.collectAsState()
+
     Scaffold(
         bottomBar = {
             BottomNavBar(
                 navController = navController,
-                hasActiveChat = hasActiveChat,
+                hasActiveChat = openAiChatOverlays.isNotEmpty(),
                 onSnapshotClick = {
                     // Capture snapshot IMMEDIATELY
                     pendingSnapshot = canDataRepository.captureSnapshot()
                     showSnapshotDialog = true
                 },
-                onAiChatClick = {
-                    activeChatId?.let { chatId ->
-                        navController.navigate(Screen.AiChat.createRoute(chatId)) {
-                            popUpTo(navController.graph.startDestinationId) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    }
+                onAiChatClick = { },
+                openAiChatOverlays = openAiChatOverlays,
+                chatSessions = chatSessions,
+                onCloseOverlay = { chatId ->
+                    openAiChatOverlays = openAiChatOverlays - chatId
+                },
+                onOpenOverlay = { chatId ->
+                    openAiChatOverlays = openAiChatOverlays + chatId
                 }
             )
         }
@@ -316,10 +323,20 @@ fun MainAppContent() {
                     },
                     onCloseApp = {
                         (context as? Activity)?.finishAffinity()
+                    },
+                    onOpenAiChat = { chatId ->
+                        openAiChatOverlays = openAiChatOverlays + chatId
                     }
                 )
             }
-            composable(Screen.Monitor.route) { MonitorScreen() }
+            composable(Screen.Monitor.route) {
+                MonitorScreen(
+                    onNavigateToChat = { chatId ->
+                        // Open as floating overlay instead of navigating
+                        openAiChatOverlays = openAiChatOverlays + chatId
+                    }
+                )
+            }
             composable(Screen.Sniffer.route) { SnifferScreen() }
             composable(Screen.Signals.route) { SignalViewerScreen() }
             composable(Screen.SignalGraph.route) { SignalGraphScreen() }
@@ -364,6 +381,9 @@ fun MainAppContent() {
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToChat = { chatId ->
                         navController.navigate(Screen.AiChat.createRoute(chatId))
+                    },
+                    onOpenAiChatOverlay = { chatId ->
+                        openAiChatOverlays = openAiChatOverlays + chatId
                     }
                 )
             }
@@ -372,6 +392,9 @@ fun MainAppContent() {
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToChat = { chatId ->
                         navController.navigate(Screen.AiChat.createRoute(chatId))
+                    },
+                    onOpenAiChatOverlay = { chatId ->
+                        openAiChatOverlays = openAiChatOverlays + chatId
                     }
                 )
             }
@@ -464,6 +487,16 @@ fun MainAppContent() {
         },
         onClose = { app.hideSerialMonitor() }
     )
+
+    // Floating AI Chat Overlays
+    openAiChatOverlays.forEachIndexed { index, chatId ->
+        FloatingAiChatWindow(
+            chatId = chatId,
+            initialOffsetX = 50f + (index * 30f),
+            initialOffsetY = 100f + (index * 30f),
+            onClose = { openAiChatOverlays = openAiChatOverlays - chatId }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -796,90 +829,181 @@ fun BottomNavBar(
     navController: NavHostController,
     hasActiveChat: Boolean = false,
     onSnapshotClick: () -> Unit,
-    onAiChatClick: () -> Unit = {}
+    onAiChatClick: () -> Unit = {},
+    openAiChatOverlays: Set<String> = emptySet(),
+    chatSessions: List<at.planqton.directcan.data.gemini.ChatSession> = emptyList(),
+    onCloseOverlay: (String) -> Unit = {},
+    onOpenOverlay: (String) -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    // Use different nav items based on active chat
-    val navItems = if (hasActiveChat) Screen.bottomNavItemsWithAiChat else Screen.bottomNavItems
+    // Always show AI button if there are any chat sessions
+    val navItems = if (chatSessions.isNotEmpty()) Screen.bottomNavItemsWithAiChat else Screen.bottomNavItems
 
-    NavigationBar(
-        modifier = Modifier.navigationBarsPadding(),
-        tonalElevation = 2.dp
-    ) {
-        navItems.forEach { screen ->
-            if (screen == Screen.Snapshot) {
-                // Special handling for snapshot button - just action, no navigation
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            screen.icon,
-                            contentDescription = screen.title,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    },
-                    label = {
-                        Text(
-                            screen.title,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1
-                        )
-                    },
-                    selected = false,
-                    onClick = onSnapshotClick,
-                    alwaysShowLabel = true
-                )
-            } else if (screen == Screen.ActiveAiChat) {
-                // Special handling for AI Chat button - navigates to active chat
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            screen.icon,
-                            contentDescription = screen.title,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    },
-                    label = {
-                        Text(
-                            screen.title,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1
-                        )
-                    },
-                    selected = currentRoute?.startsWith("ai_chat") == true,
-                    onClick = onAiChatClick,
-                    alwaysShowLabel = true
+    // State for AI chat dropdown
+    var showAiChatMenu by remember { mutableStateOf(false) }
+
+    Box {
+        NavigationBar(
+            modifier = Modifier.navigationBarsPadding(),
+            tonalElevation = 2.dp
+        ) {
+            navItems.forEach { screen ->
+                if (screen == Screen.Snapshot) {
+                    // Special handling for snapshot button - just action, no navigation
+                    NavigationBarItem(
+                        icon = {
+                            Icon(
+                                screen.icon,
+                                contentDescription = screen.title,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                screen.title,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1
+                            )
+                        },
+                        selected = false,
+                        onClick = onSnapshotClick,
+                        alwaysShowLabel = true
+                    )
+                } else if (screen == Screen.ActiveAiChat) {
+                    // Special handling for AI Chat button - shows active overlays
+                    NavigationBarItem(
+                        icon = {
+                            BadgedBox(
+                                badge = {
+                                    if (openAiChatOverlays.isNotEmpty()) {
+                                        Badge {
+                                            Text("${openAiChatOverlays.size}")
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    screen.icon,
+                                    contentDescription = screen.title,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        },
+                        label = {
+                            Text(
+                                screen.title,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1
+                            )
+                        },
+                        selected = false,
+                        onClick = { showAiChatMenu = true },
+                        alwaysShowLabel = true
+                    )
+                } else {
+                    NavigationBarItem(
+                        icon = {
+                            Icon(
+                                screen.icon,
+                                contentDescription = screen.title,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                screen.title,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1
+                            )
+                        },
+                        selected = currentRoute == screen.route,
+                        onClick = {
+                            navController.navigate(screen.route) {
+                                popUpTo(navController.graph.startDestinationId) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                        alwaysShowLabel = true
+                    )
+                }
+            }
+        }
+
+        // AI Chat dropdown menu (positioned at bottom)
+        DropdownMenu(
+            expanded = showAiChatMenu,
+            onDismissRequest = { showAiChatMenu = false },
+            modifier = Modifier.align(Alignment.BottomEnd)
+        ) {
+            if (chatSessions.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("Keine Chats vorhanden") },
+                    onClick = { showAiChatMenu = false },
+                    enabled = false
                 )
             } else {
-                NavigationBarItem(
-                    icon = {
-                        Icon(
-                            screen.icon,
-                            contentDescription = screen.title,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    },
-                    label = {
-                        Text(
-                            screen.title,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1
-                        )
-                    },
-                    selected = currentRoute == screen.route,
-                    onClick = {
-                        navController.navigate(screen.route) {
-                            popUpTo(navController.graph.startDestinationId) {
-                                saveState = true
+                // Show all chat sessions
+                chatSessions.forEach { session ->
+                    val isOpen = session.id in openAiChatOverlays
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                session.snapshotName,
+                                fontWeight = if (isOpen) androidx.compose.ui.text.font.FontWeight.Bold else null
+                            )
+                        },
+                        onClick = {
+                            showAiChatMenu = false
+                            if (!isOpen) {
+                                onOpenOverlay(session.id)
                             }
-                            launchSingleTop = true
-                            restoreState = true
+                        },
+                        leadingIcon = {
+                            if (isOpen) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = "Offen",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        },
+                        trailingIcon = {
+                            if (isOpen) {
+                                IconButton(
+                                    onClick = {
+                                        onCloseOverlay(session.id)
+                                        showAiChatMenu = false
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "Schließen",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
-                    },
-                    alwaysShowLabel = true
-                )
+                    )
+                }
             }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("AI Einstellungen") },
+                onClick = {
+                    showAiChatMenu = false
+                    navController.navigate(Screen.AiSettings.route)
+                },
+                leadingIcon = {
+                    Icon(Icons.Filled.Settings, null, Modifier.size(20.dp))
+                }
+            )
         }
     }
 }

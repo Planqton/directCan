@@ -26,15 +26,12 @@ import java.util.*
 @Composable
 fun LogManagerScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToChat: (String) -> Unit = {}
+    onNavigateToChat: (String) -> Unit = {},
+    onOpenAiChatOverlay: ((String) -> Unit)? = null
 ) {
     val canDataRepository = DirectCanApplication.instance.canDataRepository
     val aiChatRepository = DirectCanApplication.instance.aiChatRepository
     val logFiles by canDataRepository.logFiles.collectAsState()
-
-    val apiKey by aiChatRepository.apiKey.collectAsState(initial = null)
-    val selectedModel by aiChatRepository.selectedModel.collectAsState(initial = null)
-    val isAiConfigured = !apiKey.isNullOrBlank() && !selectedModel.isNullOrBlank()
 
     val dbcRepository = DirectCanApplication.instance.dbcRepository
 
@@ -165,9 +162,7 @@ fun LogManagerScreen(
                             dateFormat = dateFormat,
                             onDelete = { deleteConfirmFile = logFile },
                             onView = { selectedFile = logFile },
-                            onAiAnalyze = if (isAiConfigured) {
-                                { showAiOptionsDialog = logFile }
-                            } else null,
+                            onAiAnalyze = { showAiOptionsDialog = logFile },
                             isAiLoading = aiLoadingFile == logFile.name
                         )
                     }
@@ -362,7 +357,12 @@ fun LogManagerScreen(
                                 }
                                 aiLoadingFile = null
                                 createDbcWithChat = true
-                                onNavigateToChat(chatId)
+                                // Prefer overlay if available
+                                if (onOpenAiChatOverlay != null) {
+                                    onOpenAiChatOverlay(chatId)
+                                } else {
+                                    onNavigateToChat(chatId)
+                                }
                             } catch (e: Exception) {
                                 aiLoadingFile = null
                                 errorMessage = "Fehler: ${e.message}"
@@ -428,7 +428,7 @@ fun LogFileCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            // AI Analyze button
+            // AI Analyze button - always visible
             if (onAiAnalyze != null) {
                 IconButton(
                     onClick = onAiAnalyze,

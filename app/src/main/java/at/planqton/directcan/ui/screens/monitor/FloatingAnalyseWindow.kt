@@ -38,6 +38,7 @@ fun FloatingAnalyseWindow(
     initialOffsetX: Float,
     initialOffsetY: Float,
     onClose: () -> Unit,
+    onAiChat: ((String, String) -> Unit)? = null,  // snapshotName, snapshotData
     modifier: Modifier = Modifier
 ) {
     val configuration = LocalConfiguration.current
@@ -184,20 +185,86 @@ fun FloatingAnalyseWindow(
                             }
                         }
 
-                        // Filter checkbox
+                        // Filter checkbox and AI button
                         Row(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Checkbox(
-                                checked = hideIdentical,
-                                onCheckedChange = { hideIdentical = it },
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Text(
-                                "Identische ausblenden",
-                                style = MaterialTheme.typography.labelSmall
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = hideIdentical,
+                                    onCheckedChange = { hideIdentical = it },
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Text(
+                                    "Identische ausblenden",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+
+                            // AI Chat button
+                            if (onAiChat != null) {
+                                Surface(
+                                    onClick = {
+                                        val snapshotName = "0x${canId.toString(16).uppercase()} " +
+                                            if (selectedTab == 0) "Frames" else "ISO-TP"
+                                        val snapshotData = buildString {
+                                            appendLine("CAN ID: 0x${canId.toString(16).uppercase()}")
+                                            appendLine()
+                                            if (selectedTab == 0) {
+                                                // Frame history
+                                                appendLine("=== Frame Historie (${uniqueFrames.size} Frames) ===")
+                                                appendLine()
+                                                uniqueFrames.sortedByDescending { it.timestamp }.forEach { frame ->
+                                                    val dir = if (frame.direction == CanFrame.Direction.TX) "TX" else "RX"
+                                                    val isoTpType = if (IsoTpReassembler.isIsoTpFrame(frame.data))
+                                                        " [${IsoTpReassembler.getFrameTypeName(frame.data)}]" else ""
+                                                    appendLine("$dir: ${frame.dataHex}$isoTpType")
+                                                }
+                                            } else {
+                                                // ISO-TP messages
+                                                appendLine("=== ISO-TP Nachrichten (${uniqueIsoTpMessages.size}) ===")
+                                                appendLine()
+                                                uniqueIsoTpMessages.forEachIndexed { index, message ->
+                                                    appendLine("--- Message ${index + 1} (${message.actualLength} bytes, ${if (message.isComplete) "complete" else "incomplete"}) ---")
+                                                    appendLine("Hex: ${message.payloadHex}")
+                                                    appendLine("ASCII: ${message.payloadAscii}")
+                                                    appendLine("Frames:")
+                                                    message.frames.forEach { frame ->
+                                                        appendLine("  ${IsoTpReassembler.getFrameTypeName(frame.data)}: ${frame.dataHex}")
+                                                    }
+                                                    appendLine()
+                                                }
+                                            }
+                                        }
+                                        onAiChat(snapshotName, snapshotData)
+                                    },
+                                    modifier = Modifier.height(24.dp),
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.tertiaryContainer
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Psychology,
+                                            contentDescription = "KI Chat",
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            "KI",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         // Content - fills remaining space

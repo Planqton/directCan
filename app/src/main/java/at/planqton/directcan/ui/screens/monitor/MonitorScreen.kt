@@ -78,7 +78,9 @@ data class SendableFrame(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MonitorScreen() {
+fun MonitorScreen(
+    onNavigateToChat: (String) -> Unit = {}
+) {
     val usbManager = DirectCanApplication.instance.usbSerialManager
     val dbcRepository = DirectCanApplication.instance.dbcRepository
     val canDataRepository = DirectCanApplication.instance.canDataRepository
@@ -86,6 +88,7 @@ fun MonitorScreen() {
     val txScriptExecutor = DirectCanApplication.instance.txScriptExecutor
     val deviceManager = DirectCanApplication.instance.deviceManager
     val settingsRepository = DirectCanApplication.instance.settingsRepository
+    val aiChatRepository = DirectCanApplication.instance.aiChatRepository
 
     val connectionState by deviceManager.connectionState.collectAsState()
     val activeDbc by dbcRepository.activeDbcFile.collectAsState()
@@ -490,6 +493,27 @@ fun MonitorScreen() {
                                 if (!openAnalyseWindows.contains(frame.id)) {
                                     openAnalyseWindows = openAnalyseWindows + frame.id
                                     windowCounter++
+                                }
+                            },
+                            onAiChat = {
+                                // Create AI chat with this single frame
+                                scope.launch {
+                                    val snapshotData = buildString {
+                                        appendLine("CAN Frame:")
+                                        appendLine("ID: ${frame.idHex}")
+                                        appendLine("Length: ${frame.length}")
+                                        appendLine("Data (Hex): ${frame.dataHex}")
+                                        appendLine("Data (ASCII): ${frame.dataAscii}")
+                                        appendLine("Direction: ${if (frame.direction == CanFrame.Direction.TX) "TX" else "RX"}")
+                                        appendLine("Extended: ${frame.isExtended}")
+                                        appendLine("RTR: ${frame.isRtr}")
+                                        appendLine("Port: ${frame.port}")
+                                    }
+                                    val chatId = aiChatRepository.createChatSession(
+                                        snapshotName = "Frame ${frame.idHex}",
+                                        snapshotData = snapshotData
+                                    )
+                                    onNavigateToChat(chatId)
                                 }
                             }
                         )
@@ -1286,6 +1310,15 @@ fun MonitorScreen() {
             initialOffsetY = 100f + (index * 30f),
             onClose = {
                 openAnalyseWindows = openAnalyseWindows - canId
+            },
+            onAiChat = { snapshotName, snapshotData ->
+                scope.launch {
+                    val chatId = aiChatRepository.createChatSession(
+                        snapshotName = snapshotName,
+                        snapshotData = snapshotData
+                    )
+                    onNavigateToChat(chatId)
+                }
             }
         )
     }
@@ -1330,7 +1363,8 @@ fun CanFrameRow(
     onClick: () -> Unit = {},
     onCopy: (String) -> Unit = {},
     onAddToSend: (() -> Unit)? = null,
-    onAnalyse: (() -> Unit)? = null
+    onAnalyse: (() -> Unit)? = null,
+    onAiChat: (() -> Unit)? = null
 ) {
     val message = dbc?.findMessage(frame.id)
     val decoded = message?.let { frame.decode(it) }
@@ -1539,6 +1573,29 @@ fun CanFrameRow(
                             contentDescription = null,
                             modifier = Modifier.size(12.dp),
                             tint = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+                Spacer(Modifier.width(4.dp))
+            }
+
+            // AI Chat button (styled like Analyse button)
+            if (onAiChat != null) {
+                Surface(
+                    onClick = onAiChat,
+                    modifier = Modifier.height(20.dp),
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Psychology,
+                            contentDescription = "KI Chat",
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer
                         )
                     }
                 }

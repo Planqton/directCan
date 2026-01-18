@@ -50,6 +50,15 @@ data class ChatMessage(
     )
 }
 
+/**
+ * Type of AI chat session
+ */
+@Serializable
+enum class ChatType {
+    ANALYSIS,  // Snapshot/log analysis chat (read-only analysis)
+    EXPLORE    // Live CAN bus exploration chat (can send commands)
+}
+
 @Serializable
 data class ChatSession(
     val id: String,
@@ -60,7 +69,8 @@ data class ChatSession(
     val linkedDbcPath: String? = null,  // Path to linked DBC file for AI-generated definitions
     val providerType: String? = null,   // Provider used for this chat (e.g. "OPENCODE_ZEN")
     val modelId: String? = null,        // Model ID used for this chat
-    val apiKey: String? = null          // API key used for this chat (encrypted in real app)
+    val apiKey: String? = null,         // API key used for this chat (encrypted in real app)
+    val chatType: ChatType = ChatType.ANALYSIS  // Type of chat (analysis or explore)
 )
 
 class AiChatRepository(private val context: Context) {
@@ -138,6 +148,30 @@ class AiChatRepository(private val context: Context) {
 
     // Selected Model
     val selectedModel: Flow<String?> = context.aiChatDataStore.data.map { it[Keys.SELECTED_MODEL] }
+
+    // Combined check: Is AI properly configured (provider + API key + model)?
+    // Note: OpenCode Zen doesn't require an API key
+    val isAiConfigured: Flow<Boolean> = context.aiChatDataStore.data.map { prefs ->
+        val provider = prefs[Keys.PROVIDER]?.let {
+            try { AiProviderType.valueOf(it) } catch (e: Exception) { null }
+        } ?: AiProviderType.GEMINI
+
+        val apiKey = when (provider) {
+            AiProviderType.GEMINI -> prefs[Keys.API_KEY]
+            AiProviderType.OPENAI -> prefs[Keys.OPENAI_API_KEY]
+            AiProviderType.ANTHROPIC -> prefs[Keys.ANTHROPIC_API_KEY]
+            AiProviderType.OPENROUTER -> prefs[Keys.OPENROUTER_API_KEY]
+            AiProviderType.OPENCODE_ZEN -> prefs[Keys.OPENCODE_ZEN_API_KEY]
+        }
+
+        val model = prefs[Keys.SELECTED_MODEL]
+
+        // OpenCode Zen doesn't require API key, others do
+        val hasApiKey = !apiKey.isNullOrBlank() || provider == AiProviderType.OPENCODE_ZEN
+        val hasModel = !model.isNullOrBlank()
+
+        hasApiKey && hasModel
+    }
 
     // Delta Mode - compress snapshots to only show changes
     val deltaMode: Flow<Boolean> = context.aiChatDataStore.data.map { it[Keys.DELTA_MODE] ?: false }
@@ -354,9 +388,9 @@ class AiChatRepository(private val context: Context) {
         context.aiChatDataStore.edit { it[Keys.CHAT_SESSIONS] = sessionsJson }
     }
 
-    suspend fun createChatSession(snapshotName: String, snapshotData: String): String {
+    suspend fun createChatSession(snapshotName: String, snapshotData: String, chatType: ChatType = ChatType.ANALYSIS): String {
         val sessionId = "chat_${System.currentTimeMillis()}"
-        Log.i(TAG, "Creating chat session: $snapshotName (id: $sessionId)")
+        Log.i(TAG, "Creating chat session: $snapshotName (id: $sessionId, type: $chatType)")
 
         // Get current provider, model, and API key
         val prefs = context.aiChatDataStore.data.first()
@@ -377,13 +411,25 @@ class AiChatRepository(private val context: Context) {
             messages = emptyList(),
             providerType = currentProviderType.name,
             modelId = currentModelId,
-            apiKey = currentApiKey ?: ""
+            apiKey = currentApiKey ?: "",
+            chatType = chatType
         )
         _chatSessions.value = _chatSessions.value + session
         _activeChatId.value = sessionId
         context.aiChatDataStore.edit { it[Keys.ACTIVE_CHAT_ID] = sessionId }
         saveChatSessions()
         return sessionId
+    }
+
+    /**
+     * Create an explore chat session for live CAN bus interaction
+     */
+    suspend fun createExploreChatSession(name: String = "CAN Explorer"): String {
+        return createChatSession(
+            snapshotName = name,
+            snapshotData = "", // No initial snapshot data for explore chats
+            chatType = ChatType.EXPLORE
+        )
     }
 
     /**
@@ -732,6 +778,84 @@ class AiChatRepository(private val context: Context) {
                     appendLine("HINWEIS: IDs immer DEZIMAL angeben (0x201 = 513)")
                     appendLine()
                 }
+
+                // CAN Commands Section - Always available when device is connected
+                appendLine("=== CAN-BUS KOMMUNIKATION ===")
+                appendLine()
+                appendLine("Du kannst DIREKT mit dem CAN-Bus kommunizieren! Frames senden, UDS/ISO-TP Diagnose durchführen, etc.")
+                appendLine()
+                appendLine("WICHTIG - KOMMUNIKATIONSSTIL:")
+                appendLine("- Erkläre IMMER was du vorhast, BEVOR du einen Befehl ausgibst")
+                appendLine("- Beschreibe jeden Schritt wie ein Experte der einem Lehrling erklärt")
+                appendLine("- Nach Empfang: Erkläre die Rohdaten UND ihre Bedeutung ausführlich")
+                appendLine()
+                appendLine("BEISPIEL-DIALOG:")
+                appendLine("User: 'Was ist die Drehzahl?'")
+                appendLine("Du: 'Ich lese die Motor-Drehzahl über OBD2 Service 01, PID 0x0C.")
+                appendLine("     Dazu sende ich einen ISO-TP Request:")
+                appendLine("     - Ziel: 0x7DF (OBD2 Broadcast)")
+                appendLine("     - Daten: 02 01 0C (2 Bytes: Service 01, PID 0C)")
+                appendLine("     - Erwarte Antwort von: 0x7E8 (Motor-ECU)")
+                appendLine("     ```json")
+                appendLine("     {\"canCommands\": {\"narration\": \"Lese Motor-Drehzahl...\", \"commands\": [")
+                appendLine("       {\"type\": \"obd2Pid\", \"pid\": 12, \"txId\": 2015, \"rxId\": 2024}")
+                appendLine("     ]}}")
+                appendLine("     ```'")
+                appendLine("[Nach Ausführung erkläre die Antwort detailliert]")
+                appendLine()
+                appendLine("VERFÜGBARE CAN-BEFEHLE (JSON-Format):")
+                appendLine("```json")
+                appendLine("{\"canCommands\": {\"narration\": \"Beschreibung\", \"commands\": [...]}}")
+                appendLine("```")
+                appendLine()
+                appendLine("BEFEHLSTYPEN:")
+                appendLine("• sendFrame: Einzelnen CAN-Frame senden (keine Antwort)")
+                appendLine("  {\"type\": \"sendFrame\", \"id\": 1234, \"data\": \"02 01 0C\", \"extended\": false}")
+                appendLine()
+                appendLine("• sendIsoTp: ISO-TP Request mit Antwort-Erwartung")
+                appendLine("  {\"type\": \"sendIsoTp\", \"txId\": 2015, \"rxId\": 2024, \"data\": \"02 01 0C\", \"timeoutMs\": 2000}")
+                appendLine()
+                appendLine("• obd2Pid: OBD2 PID-Abfrage (Service 01/02)")
+                appendLine("  {\"type\": \"obd2Pid\", \"pid\": 12, \"service\": 1, \"txId\": 2015, \"rxId\": 2024}")
+                appendLine()
+                appendLine("• readDtcs: Fehlercodes lesen (UDS Service 0x19)")
+                appendLine("  {\"type\": \"readDtcs\", \"txId\": 2015, \"rxId\": 2024}")
+                appendLine()
+                appendLine("• clearDtcs: Fehlercodes löschen (⚠️ ERST FRAGEN!)")
+                appendLine("  {\"type\": \"clearDtcs\", \"txId\": 2015, \"rxId\": 2024}")
+                appendLine()
+                appendLine("• readVin: Fahrzeug-Identifikationsnummer lesen")
+                appendLine("  {\"type\": \"readVin\", \"txId\": 2015, \"rxId\": 2024}")
+                appendLine()
+                appendLine("• udsRequest: Beliebiger UDS-Service")
+                appendLine("  {\"type\": \"udsRequest\", \"txId\": 2015, \"rxId\": 2024, \"service\": 34, \"subFunction\": 1, \"data\": \"00 01 00\"}")
+                appendLine()
+                appendLine("• scanBus: Bus beobachten und aktive IDs finden")
+                appendLine("  {\"type\": \"scanBus\", \"durationMs\": 2000}")
+                appendLine()
+                appendLine("• observeIds: Bestimmte CAN-IDs beobachten")
+                appendLine("  {\"type\": \"observeIds\", \"ids\": [513, 514, 515], \"durationMs\": 2000}")
+                appendLine()
+                appendLine("• delay: Wartezeit zwischen Befehlen")
+                appendLine("  {\"type\": \"delay\", \"milliseconds\": 500}")
+                appendLine()
+                appendLine("STANDARD OBD2 IDs:")
+                appendLine("- TX: 0x7DF (2015) = Broadcast an alle ECUs")
+                appendLine("- RX: 0x7E8 (2024) = Motor-ECU Antwort")
+                appendLine()
+                appendLine("WICHTIGE PIDS (Service 01):")
+                appendLine("- 0x0C (12) = RPM (Formel: (A*256+B)/4)")
+                appendLine("- 0x0D (13) = Geschwindigkeit (km/h)")
+                appendLine("- 0x05 (5) = Kühlmitteltemperatur (°C = Wert - 40)")
+                appendLine("- 0x0F (15) = Ansauglufttemperatur (°C = Wert - 40)")
+                appendLine("- 0x11 (17) = Drosselklappenstellung (%)")
+                appendLine("- 0x2F (47) = Kraftstoffstand (%)")
+                appendLine()
+                appendLine("SICHERHEITSREGELN:")
+                appendLine("- clearDtcs: IMMER erst fragen ob der User wirklich löschen will!")
+                appendLine("- ECU-Reset, Security Access: Nur mit expliziter Bestätigung")
+                appendLine("- Unbekannte ECUs: Erst mit scanBus erkunden")
+                appendLine()
 
                 appendLine("Hilf dem Benutzer bei der Analyse dieser CAN-Bus Daten.")
                 appendLine("Erkläre Frame-IDs, Datenbytes, mögliche Signale und ihre Bedeutung.")
