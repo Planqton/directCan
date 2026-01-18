@@ -293,13 +293,13 @@ class CanSimulator {
     }
 
     // Emit frame immediately (non-suspend, uses tryEmit)
+    // SLCAN format: t<id:3><len:1><data>
     private fun emitFrameNow(id: Long, data: ByteArray) {
-        val timestamp = System.currentTimeMillis() * 1000
         val idHex = id.toString(16).uppercase().padStart(3, '0')
-        val dataBytes = data.take(8).joinToString(" ") {
+        val dataBytes = data.take(8).joinToString("") {
             (it.toInt() and 0xFF).toString(16).uppercase().padStart(2, '0')
         }
-        val line = "t$timestamp $idHex ${data.size} $dataBytes"
+        val line = "t$idHex${data.size}$dataBytes"
         _simulatedLines.tryEmit(line)
     }
 
@@ -510,13 +510,13 @@ class CanSimulator {
         return byteArrayOf(buttons.toByte(), 0, 0, 0, 0, 0, 0, 0)
     }
 
+    // SLCAN format: t<id:3><len:1><data>
     private suspend fun emitFrame(id: Long, data: ByteArray) {
-        val timestamp = System.currentTimeMillis() * 1000
         val idHex = id.toString(16).uppercase().padStart(3, '0')
-        val dataBytes = data.take(8).joinToString(" ") {
+        val dataBytes = data.take(8).joinToString("") {
             (it.toInt() and 0xFF).toString(16).uppercase().padStart(2, '0')
         }
-        val line = "t$timestamp $idHex ${data.size} $dataBytes"
+        val line = "t$idHex${data.size}$dataBytes"
         _simulatedLines.emit(line)
     }
 

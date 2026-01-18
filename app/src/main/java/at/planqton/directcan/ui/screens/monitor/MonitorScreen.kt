@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -26,9 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import at.planqton.directcan.DirectCanApplication
+import at.planqton.directcan.data.settings.SettingsRepository
 import at.planqton.directcan.data.can.CanFrame
 import at.planqton.directcan.data.dbc.DbcFile
 import at.planqton.directcan.data.device.ConnectionState
@@ -41,10 +45,21 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Data class for a sendable CAN frame row (like SavvyCAN)
  */
+@Serializable
 data class SendableFrame(
     val id: Int,                    // Row ID (not CAN ID)
     var enabled: Boolean = false,   // En checkbox
@@ -55,7 +70,8 @@ data class SendableFrame(
     var data: String = "",          // Data bytes (hex string)
     var intervalMs: Int = 0,        // Interval in ms (0 = manual only)
     var count: Int = 0,             // Send count (0 = infinite when enabled)
-    var sentCount: Int = 0          // How many times sent so far
+    var sentCount: Int = 0,         // How many times sent so far
+    var targetPorts: Set<Int> = setOf(1, 2)  // Target ports for sending (default: both)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,10 +83,18 @@ fun MonitorScreen() {
     val txScriptRepository = DirectCanApplication.instance.txScriptRepository
     val txScriptExecutor = DirectCanApplication.instance.txScriptExecutor
     val deviceManager = DirectCanApplication.instance.deviceManager
+    val settingsRepository = DirectCanApplication.instance.settingsRepository
 
     val connectionState by deviceManager.connectionState.collectAsState()
     val activeDbc by dbcRepository.activeDbcFile.collectAsState()
     val isLogging by canDataRepository.isLogging.collectAsState()
+
+    // Multi-port support
+    val connectedDeviceCount by deviceManager.connectedDeviceCount.collectAsState()
+    val showPortColumn = connectedDeviceCount > 1
+    val port1Color by settingsRepository.port1Color.collectAsState(initial = SettingsRepository.DEFAULT_PORT_1_COLOR)
+    val port2Color by settingsRepository.port2Color.collectAsState(initial = SettingsRepository.DEFAULT_PORT_2_COLOR)
+    var portFilter by remember { mutableStateOf(setOf(1, 2)) }  // Both ports enabled by default
 
     // Use centrally collected frames from repository
     val allFrames by canDataRepository.monitorFrames.collectAsState()
@@ -79,6 +103,7 @@ fun MonitorScreen() {
 
     var autoScroll by remember { mutableStateOf(true) }
     var overwriteMode by remember { mutableStateOf(true) }
+    var loopbackMode by remember { mutableStateOf(false) }
     var interpretFrames by remember { mutableStateOf(true) }
     var keepFiltersWhenClearing by remember { mutableStateOf(false) }
     var expandAllRows by remember { mutableStateOf(false) }
@@ -106,6 +131,51 @@ fun MonitorScreen() {
     // Active sending jobs
     var activeSendJobs by remember { mutableStateOf(mapOf<Int, kotlinx.coroutines.Job>()) }
 
+    // JSON for export/import
+    val json = remember { Json { prettyPrint = true; ignoreUnknownKeys = true } }
+
+    // Export launcher
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let {
+            try {
+                val jsonString = json.encodeToString(sendFrames)
+                context.contentResolver.openOutputStream(it)?.use { stream ->
+                    stream.write(jsonString.toByteArray())
+                }
+                Toast.makeText(context, "Exportiert: ${sendFrames.size} Frames", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Export fehlgeschlagen: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Import launcher
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            try {
+                val jsonString = context.contentResolver.openInputStream(it)?.bufferedReader()?.readText() ?: ""
+                val importedFrames = json.decodeFromString<List<SendableFrame>>(jsonString)
+
+                // Merge: imported frames overwrite existing by canId
+                val existingByCanId = sendFrames.associateBy { frame -> frame.canId }
+                val importedByCanId = importedFrames.associateBy { frame -> frame.canId }
+                val merged = (existingByCanId + importedByCanId).values.toList()
+
+                // Reassign IDs to avoid conflicts
+                var nextId = 1
+                sendFrames = merged.map { frame -> frame.copy(id = nextId++) }
+
+                Toast.makeText(context, "Importiert: ${importedFrames.size} Frames", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Import fehlgeschlagen: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Track individually expanded rows by frame ID
     var expandedRowIds by remember { mutableStateOf(setOf<Long>()) }
 
@@ -123,15 +193,31 @@ fun MonitorScreen() {
         canDataRepository.setOverwriteMode(overwriteMode)
     }
 
+    // Helper function to get port color
+    fun getPortColor(port: Int): Color {
+        return when (port) {
+            1 -> Color(port1Color.toInt())
+            2 -> Color(port2Color.toInt())
+            else -> Color.Gray
+        }
+    }
+
     // Update display frames when allFrames or filter changes
-    LaunchedEffect(allFrames, frameFilter) {
+    LaunchedEffect(allFrames, frameFilter, portFilter, showPortColumn) {
         // Filter frames based on shared filter state
         val enabledIds = frameFilter.filter { it.value }.keys
-        displayFrames = if (enabledIds.isEmpty() || enabledIds.size == knownIds.size) {
+        var filteredFrames = if (enabledIds.isEmpty() || enabledIds.size == knownIds.size) {
             allFrames
         } else {
             allFrames.filter { enabledIds.contains(it.id) }
         }
+
+        // Apply port filter when multiple devices connected
+        if (showPortColumn && portFilter.size < 2) {
+            filteredFrames = filteredFrames.filter { portFilter.contains(it.port) }
+        }
+
+        displayFrames = filteredFrames
 
         // Auto scroll
         if (autoScroll && displayFrames.isNotEmpty() && isLogging) {
@@ -148,7 +234,7 @@ fun MonitorScreen() {
         displayFrames = emptyList()
     }
 
-    // Send a single CAN frame
+    // Send a single CAN frame to target ports
     fun sendSingleFrame(frame: SendableFrame): Boolean {
         try {
             val canIdClean = frame.canId.trim().removePrefix("0x").removePrefix("0X")
@@ -168,7 +254,41 @@ fun MonitorScreen() {
 
             if (dataBytes.size > 8) return false
 
-            usbManager.sendCanFrame(canId, dataBytes, frame.extended)
+            // Determine which ports to send to
+            val activeDeviceKeys = deviceManager.activeDevices.value.keys
+            val portsToSend = if (connectedDeviceCount > 1) {
+                frame.targetPorts.filter { activeDeviceKeys.contains(it) }.toSet()
+            } else if (activeDeviceKeys.isNotEmpty()) {
+                setOf(activeDeviceKeys.first())  // Use actual connected port
+            } else {
+                return false  // No device connected
+            }
+
+            if (portsToSend.isEmpty()) return false
+
+            // Send to device(s) - always use deviceManager
+            scope.launch {
+                val results = deviceManager.sendCanFrameToPorts(portsToSend, canId, dataBytes, frame.extended)
+                val sendSuccess = results.values.any { it }
+
+                // Add TX frame to monitor for each port we sent to (since devices don't echo)
+                if (sendSuccess) {
+                    var timestampOffset = 0L
+                    portsToSend.forEach { port ->
+                        val txFrame = CanFrame(
+                            timestamp = System.currentTimeMillis() * 1000 + timestampOffset,
+                            id = canId,
+                            data = dataBytes,
+                            isExtended = frame.extended,
+                            isRtr = frame.remote,
+                            direction = CanFrame.Direction.TX,
+                            port = port
+                        )
+                        canDataRepository.processFrame(txFrame)
+                        timestampOffset += 1  // Ensure unique timestamps for overwrite mode
+                    }
+                }
+            }
             return true
         } catch (e: Exception) {
             return false
@@ -212,6 +332,21 @@ fun MonitorScreen() {
         sendFrames = sendFrames + SendableFrame(id = newId)
     }
 
+    // Add a frame from received CanFrame to send list
+    fun addFrameFromCanFrame(canFrame: CanFrame) {
+        val newId = (sendFrames.maxOfOrNull { it.id } ?: 0) + 1
+        sendFrames = sendFrames + SendableFrame(
+            id = newId,
+            canId = canFrame.idHex,
+            extended = canFrame.isExtended,
+            remote = canFrame.isRtr,
+            data = canFrame.dataHex,
+            targetPorts = setOf(canFrame.port)
+        )
+        // Auto-expand send panel when adding frame
+        showSendPanel = true
+    }
+
     // Remove a frame row
     fun removeFrameRow(frameId: Int) {
         activeSendJobs[frameId]?.cancel()
@@ -240,6 +375,11 @@ fun MonitorScreen() {
                     .padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // IO column (only show when multiple devices connected)
+                if (showPortColumn) {
+                    Text("IO", Modifier.width(32.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                    VerticalDivider(Modifier.height(16.dp))
+                }
                 Text("#", Modifier.width(40.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 VerticalDivider(Modifier.height(16.dp))
                 Text("Time", Modifier.width(70.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
@@ -290,7 +430,7 @@ fun MonitorScreen() {
                     state = listState,
                     modifier = Modifier.weight(1f).fillMaxWidth()
                 ) {
-                    itemsIndexed(displayFrames, key = { index, frame -> if (overwriteMode) frame.id else "${frame.timestamp}_${frame.id}" }) { index, frame ->
+                    itemsIndexed(displayFrames, key = { index, frame -> if (overwriteMode) "${frame.id}_${frame.port}" else "${frame.timestamp}_${frame.id}_${frame.port}" }) { index, frame ->
                         val isExpanded = expandAllRows || expandedRowIds.contains(frame.id)
                         CanFrameRow(
                             index = index + 1,
@@ -299,6 +439,8 @@ fun MonitorScreen() {
                             dbcForCopy = activeDbc,  // Always pass DBC for copy, regardless of display setting
                             expanded = isExpanded,
                             inlineMode = inlineDecodeMode,
+                            showPortColumn = showPortColumn,
+                            portColor = getPortColor(frame.port),
                             onClick = {
                                 expandedRowIds = if (expandedRowIds.contains(frame.id)) {
                                     expandedRowIds - frame.id
@@ -309,7 +451,8 @@ fun MonitorScreen() {
                             onCopy = { text ->
                                 clipboardManager.setText(AnnotatedString(text))
                                 Toast.makeText(context, "Kopiert!", Toast.LENGTH_SHORT).show()
-                            }
+                            },
+                            onAddToSend = { addFrameFromCanFrame(frame) }
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     }
@@ -353,47 +496,38 @@ fun MonitorScreen() {
                     Column(
                         modifier = Modifier.padding(8.dp)
                     ) {
-                        // Header row
+                        // Header row - no scroll, use weight
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .padding(vertical = 4.dp, horizontal = 2.dp),
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("", Modifier.width(28.dp)) // Row number
-                            Text("En", Modifier.width(36.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                            Text("Bus", Modifier.width(40.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                            Text("ID", Modifier.width(70.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                            Text("Ext", Modifier.width(36.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                            Text("Rem", Modifier.width(36.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                            Text("Data", Modifier.width(180.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                            Text("Interval", Modifier.width(70.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                            Text("Count", Modifier.width(60.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                            Text("Sent", Modifier.width(50.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                            Text("", Modifier.width(80.dp)) // Actions
+                            Text("En", Modifier.width(40.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            if (showPortColumn) {
+                                Text("Port", Modifier.width(50.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            }
+                            Text("ID", Modifier.width(80.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("X", Modifier.width(32.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("R", Modifier.width(32.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("Data (hex, space-separated)", Modifier.weight(1f).padding(horizontal = 4.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            Text("ms", Modifier.width(60.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("Cnt", Modifier.width(50.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("Tx", Modifier.width(40.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            Text("", Modifier.width(70.dp)) // Actions
                         }
 
                         HorizontalDivider()
 
-                        // Frame rows
+                        // Frame rows - fill width
                         sendFrames.forEachIndexed { index, frame ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState())
-                                    .padding(vertical = 2.dp, horizontal = 2.dp),
+                                    .padding(vertical = 4.dp, horizontal = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Row number
-                                Text(
-                                    "${index + 1}",
-                                    Modifier.width(28.dp),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    textAlign = TextAlign.Center
-                                )
-
                                 // En checkbox
                                 Checkbox(
                                     checked = frame.enabled,
@@ -401,84 +535,142 @@ fun MonitorScreen() {
                                         updateFrame(frame.id) { it.copy(enabled = enabled, sentCount = if (!enabled) 0 else it.sentCount) }
                                         toggleFrameSending(frame.copy(enabled = enabled), enabled)
                                     },
-                                    modifier = Modifier.size(36.dp),
-                                    enabled = connectionState == ConnectionState.CONNECTED && frame.canId.isNotBlank()
+                                    modifier = Modifier.size(40.dp),
+                                    enabled = connectedDeviceCount > 0 && frame.canId.isNotBlank()
                                 )
 
-                                // Bus
-                                OutlinedTextField(
-                                    value = frame.bus.toString(),
-                                    onValueChange = { v -> updateFrame(frame.id) { it.copy(bus = v.toIntOrNull() ?: 0) } },
-                                    modifier = Modifier.width(40.dp).height(40.dp),
-                                    singleLine = true,
-                                    textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
-                                )
-
-                                Spacer(Modifier.width(2.dp))
+                                // Port selection (only when multi-port)
+                                if (showPortColumn) {
+                                    Row(
+                                        modifier = Modifier.width(50.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Port 1
+                                        Box(
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .background(
+                                                    if (1 in frame.targetPorts) getPortColor(1).copy(alpha = 0.3f) else Color.Transparent,
+                                                    RoundedCornerShape(3.dp)
+                                                )
+                                                .border(1.dp, getPortColor(1), RoundedCornerShape(3.dp))
+                                                .clickable {
+                                                    val newPorts = if (1 in frame.targetPorts) {
+                                                        if (frame.targetPorts.size > 1) frame.targetPorts - 1 else frame.targetPorts
+                                                    } else {
+                                                        frame.targetPorts + 1
+                                                    }
+                                                    updateFrame(frame.id) { it.copy(targetPorts = newPorts) }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (1 in frame.targetPorts) {
+                                                Text("1", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = getPortColor(1))
+                                            }
+                                        }
+                                        Spacer(Modifier.width(2.dp))
+                                        // Port 2
+                                        Box(
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .background(
+                                                    if (2 in frame.targetPorts) getPortColor(2).copy(alpha = 0.3f) else Color.Transparent,
+                                                    RoundedCornerShape(3.dp)
+                                                )
+                                                .border(1.dp, getPortColor(2), RoundedCornerShape(3.dp))
+                                                .clickable {
+                                                    val newPorts = if (2 in frame.targetPorts) {
+                                                        if (frame.targetPorts.size > 1) frame.targetPorts - 2 else frame.targetPorts
+                                                    } else {
+                                                        frame.targetPorts + 2
+                                                    }
+                                                    updateFrame(frame.id) { it.copy(targetPorts = newPorts) }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (2 in frame.targetPorts) {
+                                                Text("2", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = getPortColor(2))
+                                            }
+                                        }
+                                    }
+                                }
 
                                 // ID
                                 OutlinedTextField(
                                     value = frame.canId,
                                     onValueChange = { v -> updateFrame(frame.id) { it.copy(canId = v.filter { c -> c.isLetterOrDigit() }) } },
-                                    modifier = Modifier.width(70.dp).height(40.dp),
+                                    modifier = Modifier.width(80.dp),
                                     singleLine = true,
-                                    placeholder = { Text("7DF", fontSize = 10.sp) },
-                                    textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    placeholder = { Text("7DF", fontSize = 13.sp) },
+                                    textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, fontFamily = FontFamily.Monospace),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                                    )
                                 )
 
-                                // Ext checkbox
+                                // Ext checkbox (X = Extended ID)
                                 Checkbox(
                                     checked = frame.extended,
                                     onCheckedChange = { v -> updateFrame(frame.id) { it.copy(extended = v) } },
-                                    modifier = Modifier.size(36.dp)
+                                    modifier = Modifier.size(32.dp)
                                 )
 
-                                // Rem/RTR checkbox
+                                // Rem/RTR checkbox (R = Remote)
                                 Checkbox(
                                     checked = frame.remote,
                                     onCheckedChange = { v -> updateFrame(frame.id) { it.copy(remote = v) } },
-                                    modifier = Modifier.size(36.dp)
+                                    modifier = Modifier.size(32.dp)
                                 )
 
-                                // Data
+                                // Data - weight to fill remaining space
                                 OutlinedTextField(
                                     value = frame.data,
                                     onValueChange = { v -> updateFrame(frame.id) { it.copy(data = v) } },
-                                    modifier = Modifier.width(180.dp).height(40.dp),
+                                    modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
                                     singleLine = true,
-                                    placeholder = { Text("02 01 00", fontSize = 10.sp) },
-                                    textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                    placeholder = { Text("02 01 00 00 00 00 00 00", fontSize = 13.sp) },
+                                    textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, fontFamily = FontFamily.Monospace),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                                    )
                                 )
-
-                                Spacer(Modifier.width(2.dp))
 
                                 // Interval (ms)
                                 OutlinedTextField(
                                     value = if (frame.intervalMs == 0) "" else frame.intervalMs.toString(),
                                     onValueChange = { v -> updateFrame(frame.id) { it.copy(intervalMs = v.toIntOrNull() ?: 0) } },
-                                    modifier = Modifier.width(70.dp).height(40.dp),
+                                    modifier = Modifier.width(60.dp),
                                     singleLine = true,
-                                    placeholder = { Text("ms", fontSize = 10.sp) },
-                                    textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+                                    placeholder = { Text("0", fontSize = 13.sp) },
+                                    textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                                    )
                                 )
 
-                                Spacer(Modifier.width(2.dp))
-
-                                // Count (0 = infinite)
+                                // Count
                                 OutlinedTextField(
                                     value = if (frame.count == 0) "" else frame.count.toString(),
                                     onValueChange = { v -> updateFrame(frame.id) { it.copy(count = v.toIntOrNull() ?: 0) } },
-                                    modifier = Modifier.width(60.dp).height(40.dp),
+                                    modifier = Modifier.width(50.dp),
                                     singleLine = true,
-                                    placeholder = { Text("∞", fontSize = 10.sp) },
-                                    textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center)
+                                    placeholder = { Text("∞", fontSize = 13.sp) },
+                                    textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.Center),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                                    )
                                 )
 
                                 // Sent count display
                                 Text(
                                     "${frame.sentCount}",
-                                    Modifier.width(50.dp),
-                                    style = MaterialTheme.typography.bodySmall,
+                                    Modifier.width(40.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
                                     fontFamily = FontFamily.Monospace,
                                     textAlign = TextAlign.Center,
                                     color = if (frame.sentCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
@@ -494,17 +686,17 @@ fun MonitorScreen() {
                                             Toast.makeText(context, "Fehler", Toast.LENGTH_SHORT).show()
                                         }
                                     },
-                                    enabled = connectionState == ConnectionState.CONNECTED && frame.canId.isNotBlank(),
-                                    modifier = Modifier.size(32.dp)
+                                    enabled = connectedDeviceCount > 0 && frame.canId.isNotBlank(),
+                                    modifier = Modifier.size(36.dp)
                                 ) {
-                                    Icon(Icons.Default.Send, contentDescription = "Einmal senden", modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Send, contentDescription = "Einmal senden", modifier = Modifier.size(18.dp))
                                 }
 
                                 IconButton(
                                     onClick = { removeFrameRow(frame.id) },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(36.dp)
                                 ) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Löschen", modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Delete, contentDescription = "Löschen", modifier = Modifier.size(18.dp))
                                 }
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
@@ -528,11 +720,51 @@ fun MonitorScreen() {
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(Modifier.width(4.dp))
-                                    Text("Script einhängen")
+                                    Text("Script")
+                                }
+                                // Import/Export buttons
+                                TextButton(
+                                    onClick = {
+                                        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                                        exportLauncher.launch("can_send_$timestamp.json")
+                                    },
+                                    enabled = sendFrames.any { it.canId.isNotBlank() }
+                                ) {
+                                    Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Export")
+                                }
+                                TextButton(
+                                    onClick = { importLauncher.launch(arrayOf("application/json")) }
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Import")
+                                }
+                                // DEBUG: Inject test frame directly into repository
+                                TextButton(
+                                    onClick = {
+                                        val testFrame = CanFrame(
+                                            timestamp = System.currentTimeMillis() * 1000,
+                                            id = 0x7DF,
+                                            data = byteArrayOf(0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
+                                            direction = CanFrame.Direction.TX,
+                                            port = 1
+                                        )
+                                        canDataRepository.processFrame(testFrame)
+                                        Toast.makeText(context, "Debug Frame injected!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.error
+                                    )
+                                ) {
+                                    Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("DEBUG")
                                 }
                             }
                             Text(
-                                "Interval=0: manuell | Count=0: endlos",
+                                "ms=0: manuell | Cnt=0: endlos",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -562,15 +794,18 @@ fun MonitorScreen() {
                         loadedScript = null
                     }
                 },
-                onStart = {
+                onStart = { ports ->
                     loadedScript?.let { script ->
-                        txScriptExecutor.start(script)
+                        txScriptExecutor.start(script, ports)
                     }
                 },
                 onPause = { txScriptExecutor.pause() },
                 onResume = { txScriptExecutor.resume() },
                 onStop = { txScriptExecutor.stop() },
-                onShowErrors = { showScriptErrorLog = true }
+                onShowErrors = { showScriptErrorLog = true },
+                showPortSelection = showPortColumn,
+                port1Color = getPortColor(1),
+                port2Color = getPortColor(2)
             )
         }
 
@@ -700,6 +935,23 @@ fun MonitorScreen() {
                     Text("Interpret Frames", style = MaterialTheme.typography.bodySmall)
                 }
 
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Checkbox(
+                        checked = loopbackMode,
+                        onCheckedChange = { enabled ->
+                            loopbackMode = enabled
+                            scope.launch {
+                                deviceManager.send(if (enabled) "K1\r" else "K0\r")
+                            }
+                        },
+                        enabled = connectionState == ConnectionState.CONNECTED
+                    )
+                    Text("Loopback (Test ohne Bus)", style = MaterialTheme.typography.bodySmall)
+                }
+
                 Spacer(Modifier.height(8.dp))
 
                 // Decode Mode Toggle: Inline vs Expanded
@@ -727,6 +979,68 @@ fun MonitorScreen() {
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
+
+                // Port Filtering (only show when multiple devices connected)
+                if (showPortColumn) {
+                    Text(
+                        "Port Filter:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = 1 in portFilter,
+                            onClick = {
+                                portFilter = if (1 in portFilter) {
+                                    if (portFilter.size > 1) portFilter - 1 else portFilter
+                                } else {
+                                    portFilter + 1
+                                }
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .background(getPortColor(1), RoundedCornerShape(2.dp))
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Port 1", fontSize = 11.sp)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = 2 in portFilter,
+                            onClick = {
+                                portFilter = if (2 in portFilter) {
+                                    if (portFilter.size > 1) portFilter - 2 else portFilter
+                                } else {
+                                    portFilter + 2
+                                }
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .background(getPortColor(2), RoundedCornerShape(2.dp))
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Port 2", fontSize = 11.sp)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                }
 
                 // Frame Filtering
                 Text(
@@ -825,8 +1139,11 @@ fun CanFrameRow(
     dbcForCopy: DbcFile? = dbc,
     expanded: Boolean,
     inlineMode: Boolean = true,
+    showPortColumn: Boolean = false,
+    portColor: Color = Color.Gray,
     onClick: () -> Unit = {},
-    onCopy: (String) -> Unit = {}
+    onCopy: (String) -> Unit = {},
+    onAddToSend: (() -> Unit)? = null
 ) {
     val message = dbc?.findMessage(frame.id)
     val decoded = message?.let { frame.decode(it) }
@@ -860,6 +1177,29 @@ fun CanFrameRow(
                 .padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // IO (Port number) - only show when multiple devices connected
+            if (showPortColumn) {
+                Box(
+                    modifier = Modifier
+                        .width(32.dp)
+                        .background(
+                            portColor.copy(alpha = 0.2f),
+                            RoundedCornerShape(4.dp)
+                        )
+                        .padding(vertical = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "${frame.port}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = portColor,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                VerticalDivider(Modifier.height(20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            }
             // # (Row number)
             Text(
                 "$index",
@@ -980,6 +1320,21 @@ fun CanFrameRow(
                     )
                 } else if (dbc != null) {
                     Spacer(Modifier.width(300.dp))
+                }
+            }
+
+            // Add to Send button
+            if (onAddToSend != null) {
+                IconButton(
+                    onClick = onAddToSend,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "Zu Senden hinzufügen",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }

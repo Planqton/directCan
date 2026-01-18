@@ -12,9 +12,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Folder
@@ -32,6 +35,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import at.planqton.directcan.data.can.CanDataRepository
+import at.planqton.directcan.data.settings.SettingsRepository
 import at.planqton.directcan.ui.navigation.Screen
 import at.planqton.directcan.data.dbc.DbcFileInfo
 import at.planqton.directcan.ui.screens.dbc.DbcEditorScreen
@@ -410,8 +414,17 @@ fun MainAppContent() {
                 showSnapshotDialog = false
                 pendingSnapshot = null
             },
-            onSave = { logFile, description ->
-                canDataRepository.saveSnapshot(pendingSnapshot!!, logFile, description)
+            onSave = { logFile, description, ports ->
+                // Filter snapshot frames by selected ports
+                val filteredSnapshot = if (ports.size < 2) {
+                    pendingSnapshot!!.copy(
+                        frames = pendingSnapshot!!.frames.filterValues { it.port in ports },
+                        ports = ports
+                    )
+                } else {
+                    pendingSnapshot!!
+                }
+                canDataRepository.saveSnapshot(filteredSnapshot, logFile, description)
                 showSnapshotDialog = false
                 pendingSnapshot = null
             },
@@ -429,16 +442,43 @@ fun MainAppContent() {
 fun SnapshotDialog(
     snapshot: CanDataRepository.SnapshotData,
     onDismiss: () -> Unit,
-    onSave: (CanDataRepository.LogFileInfo, String) -> Unit,
+    onSave: (CanDataRepository.LogFileInfo, String, Set<Int>) -> Unit,
     onNavigateToLogManager: () -> Unit = {}
 ) {
     val canDataRepository = DirectCanApplication.instance.canDataRepository
     val aiChatRepository = DirectCanApplication.instance.aiChatRepository
+    val deviceManager = DirectCanApplication.instance.deviceManager
+    val settingsRepository = DirectCanApplication.instance.settingsRepository
     val logFiles by canDataRepository.logFiles.collectAsState()
     val recentDescriptions by canDataRepository.recentDescriptions.collectAsState()
     val chatSessions by aiChatRepository.chatSessions.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // Multi-port support
+    val connectedDeviceCount by deviceManager.connectedDeviceCount.collectAsState()
+    val showPortFilter = connectedDeviceCount > 1
+    val port1Color by settingsRepository.port1Color.collectAsState(initial = SettingsRepository.DEFAULT_PORT_1_COLOR)
+    val port2Color by settingsRepository.port2Color.collectAsState(initial = SettingsRepository.DEFAULT_PORT_2_COLOR)
+    var snapshotPorts by remember { mutableStateOf(setOf(1, 2)) }
+
+    // Helper function to get port color
+    fun getPortColor(port: Int): Color {
+        return when (port) {
+            1 -> Color(port1Color.toInt())
+            2 -> Color(port2Color.toInt())
+            else -> Color.Gray
+        }
+    }
+
+    // Calculate filtered frame count
+    val filteredFrameCount = remember(snapshot.frames, snapshotPorts, showPortFilter) {
+        if (showPortFilter) {
+            snapshot.frames.values.count { it.port in snapshotPorts }
+        } else {
+            snapshot.frames.size
+        }
+    }
 
     var selectedLogFile by remember { mutableStateOf<CanDataRepository.LogFileInfo?>(null) }
     var description by remember { mutableStateOf("") }
@@ -464,7 +504,7 @@ fun SnapshotDialog(
                 Text("Snapshot gespeichert!")
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "(${snapshot.frames.size} Frames)",
+                    "($filteredFrameCount Frames)",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -472,6 +512,62 @@ fun SnapshotDialog(
         },
         text = {
             Column {
+                // Port filter (only when multiple devices connected)
+                if (showPortFilter) {
+                    Text("Von welchen Ports?", style = MaterialTheme.typography.labelMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = 1 in snapshotPorts,
+                            onClick = {
+                                snapshotPorts = if (1 in snapshotPorts) {
+                                    if (snapshotPorts.size > 1) snapshotPorts - 1 else snapshotPorts
+                                } else {
+                                    snapshotPorts + 1
+                                }
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .background(getPortColor(1), RoundedCornerShape(2.dp))
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Port 1")
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = 2 in snapshotPorts,
+                            onClick = {
+                                snapshotPorts = if (2 in snapshotPorts) {
+                                    if (snapshotPorts.size > 1) snapshotPorts - 2 else snapshotPorts
+                                } else {
+                                    snapshotPorts + 2
+                                }
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .background(getPortColor(2), RoundedCornerShape(2.dp))
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Port 2")
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+
                 // Log file selection
                 Text("In welches Log speichern?", style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.height(4.dp))
@@ -589,7 +685,7 @@ fun SnapshotDialog(
             TextButton(
                 onClick = {
                     selectedLogFile?.let { logFile ->
-                        onSave(logFile, description.ifBlank { "Unbenannter Snapshot" })
+                        onSave(logFile, description.ifBlank { "Unbenannter Snapshot" }, snapshotPorts)
 
                         // Update any open chat for this log file
                         val relatedChat = chatSessions.find { it.snapshotName == logFile.name }

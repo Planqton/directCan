@@ -39,9 +39,9 @@ fun HomeScreen(
     // Device Manager state
     val deviceConfigs by deviceManager.deviceConfigs.collectAsState()
     val devices by deviceManager.devices.collectAsState()
-    val activeDevice by deviceManager.activeDevice.collectAsState()
+    val activeDevices by deviceManager.activeDevices.collectAsState()
+    val connectedDeviceCount by deviceManager.connectedDeviceCount.collectAsState()
     val deviceConnectionState by deviceManager.connectionState.collectAsState()
-    val canBitrate by deviceManager.canBitrate.collectAsState()
 
     val scope = rememberCoroutineScope()
     var firmwareInfo by remember { mutableStateOf<String?>(null) }
@@ -83,15 +83,16 @@ fun HomeScreen(
             item {
                 DeviceConnectionCard(
                     deviceConfigs = deviceConfigs,
-                    activeDevice = activeDevice,
+                    activeDevices = activeDevices,
+                    connectedDeviceCount = connectedDeviceCount,
                     connectionState = deviceConnectionState,
                     autoStartLogging = autoStartLogging,
                     isLogging = isLogging,
-                    canBitrate = canBitrate,
                     onConnect = { configId -> scope.launch { deviceManager.connect(configId) } },
-                    onDisconnect = { scope.launch { deviceManager.disconnect() } },
+                    onDisconnectDevice = { configId -> scope.launch { deviceManager.disconnectDevice(configId) } },
+                    onDisconnectAll = { scope.launch { deviceManager.disconnect() } },
                     onAutoStartChanged = { canDataRepository.setAutoStartLogging(it) },
-                    onCanBitrateChanged = { scope.launch { deviceManager.setCanBitrate(it) } },
+                    onDeviceBitrateChanged = { configId, bitrate -> scope.launch { deviceManager.updateDeviceBitrate(configId, bitrate) } },
                     onOpenDeviceManager = onNavigateToDeviceManager
                 )
             }
@@ -249,9 +250,8 @@ fun ConfiguredDeviceCard(
     onDisconnect: () -> Unit
 ) {
     val icon = when (config.type) {
-        DeviceType.USB_SERIAL -> Icons.Default.Usb
+        DeviceType.USB_SLCAN -> Icons.Default.Usb
         DeviceType.SIMULATOR -> Icons.Default.DirectionsCar
-        DeviceType.PEAK_CAN -> Icons.Default.Router
     }
 
     val statusColor = when (connectionState) {
@@ -327,30 +327,18 @@ fun ConfiguredDeviceCard(
 @Composable
 fun DeviceConnectionCard(
     deviceConfigs: List<DeviceConfig>,
-    activeDevice: CanDevice?,
+    activeDevices: Map<Int, CanDevice>,
+    connectedDeviceCount: Int,
     connectionState: ConnectionState,
     autoStartLogging: Boolean,
     isLogging: Boolean,
-    canBitrate: Int,
     onConnect: (String) -> Unit,
-    onDisconnect: () -> Unit,
+    onDisconnectDevice: (String) -> Unit,
+    onDisconnectAll: () -> Unit,
     onAutoStartChanged: (Boolean) -> Unit,
-    onCanBitrateChanged: (Int) -> Unit,
+    onDeviceBitrateChanged: (String, Int) -> Unit,
     onOpenDeviceManager: () -> Unit
 ) {
-    // Standard CAN bus bitrates
-    val standardCanBitrates = listOf(
-        10000 to "10 kbit/s",
-        20000 to "20 kbit/s",
-        50000 to "50 kbit/s",
-        100000 to "100 kbit/s",
-        125000 to "125 kbit/s",
-        250000 to "250 kbit/s",
-        500000 to "500 kbit/s",
-        800000 to "800 kbit/s",
-        1000000 to "1 Mbit/s"
-    )
-    var bitrateExpanded by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -374,55 +362,6 @@ fun DeviceConnectionCard(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
-
-            // CAN-Bitrate Dropdown - vor der Geräteliste
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    "CAN-Bitrate:",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.width(100.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                ExposedDropdownMenuBox(
-                    expanded = bitrateExpanded,
-                    onExpandedChange = { bitrateExpanded = it },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    OutlinedTextField(
-                        value = standardCanBitrates.find { it.first == canBitrate }?.second
-                            ?: "${canBitrate / 1000} kbit/s",
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bitrateExpanded) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
-                        textStyle = MaterialTheme.typography.bodyMedium
-                    )
-                    ExposedDropdownMenu(
-                        expanded = bitrateExpanded,
-                        onDismissRequest = { bitrateExpanded = false }
-                    ) {
-                        standardCanBitrates.forEach { (value, label) ->
-                            DropdownMenuItem(
-                                text = { Text(label) },
-                                onClick = {
-                                    onCanBitrateChanged(value)
-                                    bitrateExpanded = false
-                                },
-                                contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
-                            )
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            HorizontalDivider()
             Spacer(Modifier.height(12.dp))
 
             // Device List
@@ -449,20 +388,23 @@ fun DeviceConnectionCard(
                     }
                 }
             } else {
-                // List of configured devices - only one can be connected at a time
-                val isAnyConnected = connectionState == ConnectionState.CONNECTED
+                // List of configured devices - up to 2 can be connected at a time
+                val canConnectMore = connectedDeviceCount < 2
 
                 deviceConfigs.forEach { config ->
-                    val isActive = activeDevice?.id == config.id
-                    val state = if (isActive) connectionState else ConnectionState.DISCONNECTED
+                    // Find if this device is connected and on which port
+                    val connectedPort = activeDevices.entries.find { it.value.id == config.id }?.key
+                    val isConnected = connectedPort != null
+                    val state = if (isConnected) ConnectionState.CONNECTED else ConnectionState.DISCONNECTED
 
                     DeviceListItem(
                         config = config,
                         connectionState = state,
-                        isActive = isActive,
-                        canConnect = !isAnyConnected || isActive, // Only show connect if none connected
+                        connectedPort = connectedPort,
+                        canConnect = canConnectMore && !isConnected,
+                        onBitrateChanged = { bitrate -> onDeviceBitrateChanged(config.id, bitrate) },
                         onConnect = { onConnect(config.id) },
-                        onDisconnect = onDisconnect
+                        onDisconnect = { onDisconnectDevice(config.id) }
                     )
                     if (config != deviceConfigs.last()) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -509,10 +451,10 @@ fun DeviceConnectionCard(
 }
 
 /**
- * Get the detected USB device name for a UsbSerialConfig.
+ * Get the detected USB device name for a UsbSlcanConfig.
  * Returns the product name of the matching USB device, or null if not found.
  */
-private fun getDetectedUsbDeviceName(context: Context, config: UsbSerialConfig): String? {
+private fun getDetectedUsbDeviceName(context: Context, config: UsbSlcanConfig): String? {
     val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
     val drivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
 
@@ -528,25 +470,27 @@ private fun getDetectedUsbDeviceName(context: Context, config: UsbSerialConfig):
     }
 }
 
-/**
- * Get the detected USB device name for a PeakCanConfig.
- * Returns the product name of the PEAK CAN device, or null if not found.
- */
-private fun getDetectedPeakCanDeviceName(context: Context): String? {
-    val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
+// Standard CAN bus bitrates for dropdown
+private val standardCanBitrates = listOf(
+    10000 to "10 kbit/s",
+    20000 to "20 kbit/s",
+    50000 to "50 kbit/s",
+    100000 to "100 kbit/s",
+    125000 to "125 kbit/s",
+    250000 to "250 kbit/s",
+    500000 to "500 kbit/s",
+    800000 to "800 kbit/s",
+    1000000 to "1 Mbit/s"
+)
 
-    // Check all connected USB devices for PEAK vendor ID
-    return usbManager.deviceList.values.find { device ->
-        device.vendorId == PeakCanConfig.PEAK_VENDOR_ID
-    }?.productName
-}
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeviceListItem(
     config: DeviceConfig,
     connectionState: ConnectionState,
-    isActive: Boolean,
+    connectedPort: Int?,
     canConnect: Boolean,
+    onBitrateChanged: (Int) -> Unit,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit
 ) {
@@ -555,17 +499,14 @@ private fun DeviceListItem(
     // Detect USB device name - live update every 2 seconds
     var detectedDeviceName by remember { mutableStateOf<String?>(null) }
 
+    // Bitrate dropdown state
+    var bitrateExpanded by remember { mutableStateOf(false) }
+
     LaunchedEffect(config) {
         when (config) {
-            is UsbSerialConfig -> {
+            is UsbSlcanConfig -> {
                 while (true) {
                     detectedDeviceName = getDetectedUsbDeviceName(context, config)
-                    kotlinx.coroutines.delay(2000) // Check every 2 seconds
-                }
-            }
-            is PeakCanConfig -> {
-                while (true) {
-                    detectedDeviceName = getDetectedPeakCanDeviceName(context)
                     kotlinx.coroutines.delay(2000) // Check every 2 seconds
                 }
             }
@@ -574,9 +515,8 @@ private fun DeviceListItem(
     }
 
     val icon = when (config.type) {
-        DeviceType.USB_SERIAL -> Icons.Default.Usb
+        DeviceType.USB_SLCAN -> Icons.Default.Usb
         DeviceType.SIMULATOR -> Icons.Default.DirectionsCar
-        DeviceType.PEAK_CAN -> Icons.Default.Router
     }
 
     val statusColor = when (connectionState) {
@@ -586,74 +526,163 @@ private fun DeviceListItem(
         ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 8.dp)
     ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = if (connectionState == ConnectionState.CONNECTED)
-                Color(0xFF4CAF50)
-            else
-                MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(24.dp)
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            // Show config name with detected device name
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(config.name, style = MaterialTheme.typography.bodyLarge)
-                // Show detected device name for USB Serial and PEAK CAN configs
-                if (config is UsbSerialConfig || config is PeakCanConfig) {
-                    if (detectedDeviceName != null) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (connectionState == ConnectionState.CONNECTED)
+                    Color(0xFF4CAF50)
+                else
+                    MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                // Show config name with detected device name
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(config.name, style = MaterialTheme.typography.bodyLarge)
+                    // Show detected device name for USB SLCAN configs
+                    if (config is UsbSlcanConfig) {
+                        if (detectedDeviceName != null) {
+                            Text(
+                                " - $detectedDeviceName",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Text(
+                                " - Nicht erkannt",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+                // Status text with port info
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (connectedPort != null) {
                         Text(
-                            " - $detectedDeviceName",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary
+                            "Port $connectedPort • Verbunden",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = statusColor
                         )
                     } else {
                         Text(
-                            " - Nicht erkannt",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                            when (connectionState) {
+                                ConnectionState.CONNECTED -> "Verbunden"
+                                ConnectionState.CONNECTING -> "Verbinde..."
+                                ConnectionState.ERROR -> "Fehler"
+                                ConnectionState.DISCONNECTED -> "Getrennt"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = statusColor
                         )
+                        // Show hint if max devices reached
+                        if (!canConnect && connectionState == ConnectionState.DISCONNECTED) {
+                            Text(
+                                " (Max. 2 erreicht)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
-            Text(
-                when (connectionState) {
-                    ConnectionState.CONNECTED -> "Verbunden"
-                    ConnectionState.CONNECTING -> "Verbinde..."
-                    ConnectionState.ERROR -> "Fehler"
-                    ConnectionState.DISCONNECTED -> "Getrennt"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = statusColor
-            )
+
+            when (connectionState) {
+                ConnectionState.CONNECTED -> {
+                    FilledTonalButton(onClick = onDisconnect) {
+                        Text("Trennen")
+                    }
+                }
+                ConnectionState.CONNECTING -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+                ConnectionState.DISCONNECTED, ConnectionState.ERROR -> {
+                    if (canConnect) {
+                        Button(onClick = onConnect) {
+                            Text("Verbinden")
+                        }
+                    }
+                    // If max devices connected, show nothing (hint shown in status text)
+                }
+            }
         }
 
-        when (connectionState) {
-            ConnectionState.CONNECTED -> {
-                FilledTonalButton(onClick = onDisconnect) {
-                    Text("Trennen")
-                }
-            }
-            ConnectionState.CONNECTING -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp
+        // CAN Bitrate dropdown (only for USB SLCAN devices)
+        if (config is UsbSlcanConfig) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 36.dp), // Align with text (24dp icon + 12dp spacer)
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "CAN-Bitrate:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (connectionState == ConnectionState.CONNECTED)
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-            ConnectionState.DISCONNECTED, ConnectionState.ERROR -> {
-                if (canConnect) {
-                    Button(onClick = onConnect) {
-                        Text("Verbinden")
+                Spacer(Modifier.width(8.dp))
+                ExposedDropdownMenuBox(
+                    expanded = bitrateExpanded,
+                    onExpandedChange = {
+                        if (connectionState != ConnectionState.CONNECTED) {
+                            bitrateExpanded = it
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    OutlinedTextField(
+                        value = standardCanBitrates.find { it.first == config.canBitrate }?.second
+                            ?: "${config.canBitrate / 1000} kbit/s",
+                        onValueChange = {},
+                        readOnly = true,
+                        enabled = connectionState != ConnectionState.CONNECTED,
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = bitrateExpanded)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                            disabledTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        )
+                    )
+                    ExposedDropdownMenu(
+                        expanded = bitrateExpanded,
+                        onDismissRequest = { bitrateExpanded = false }
+                    ) {
+                        standardCanBitrates.forEach { (value, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    onBitrateChanged(value)
+                                    bitrateExpanded = false
+                                },
+                                contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
+                            )
+                        }
                     }
                 }
-                // If another device is connected, show nothing for this device
             }
         }
     }

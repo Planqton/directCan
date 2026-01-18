@@ -262,9 +262,13 @@ class UsbSerialManager(private val context: Context) {
                 _connectionState.value = ConnectionState.CONNECTED
                 refreshDeviceList()
 
-                // Request firmware info
-                send("i\n")
-                Log.i(TAG, "USB device connected successfully")
+                // SLCAN: Set bitrate and open CAN
+                send("S6\r")  // 500k default
+                Thread.sleep(50)
+                send("O\r")   // Open CAN
+                Thread.sleep(50)
+                send("V\r")   // Request version
+                Log.i(TAG, "USB device connected successfully (SLCAN)")
 
             } catch (e: Exception) {
                 Log.e(TAG, "Connection failed", e)
@@ -351,50 +355,79 @@ class UsbSerialManager(private val context: Context) {
         }
     }
 
-    // Firmware commands
+    // SLCAN commands
     fun sendCanFrame(id: Long, data: ByteArray, extended: Boolean = false) {
-        val idHex = id.toString(16).uppercase()
-        val extMarker = if (extended) "X" else ""
-        val dataHex = data.joinToString(" ") { it.toInt().and(0xFF).toString(16).uppercase().padStart(2, '0') }
-        send("s$idHex$extMarker ${data.size} $dataHex\n")
+        // SLCAN format: t<id:3><len:1><data> or T<id:8><len:1><data>
+        val command = if (extended) {
+            val idHex = id.toString(16).uppercase().padStart(8, '0')
+            val dataHex = data.joinToString("") { "%02X".format(it.toInt().and(0xFF)) }
+            "T$idHex${data.size}$dataHex\r"
+        } else {
+            val idHex = id.toString(16).uppercase().padStart(3, '0')
+            val dataHex = data.joinToString("") { "%02X".format(it.toInt().and(0xFF)) }
+            "t$idHex${data.size}$dataHex\r"
+        }
+        send(command)
     }
 
+    // ISO-TP is not supported in SLCAN - these are kept for API compatibility
     fun sendIsoTp(txId: Long, rxId: Long, data: ByteArray) {
-        val txHex = txId.toString(16).uppercase()
-        val rxHex = rxId.toString(16).uppercase()
-        val dataHex = data.joinToString(" ") { it.toInt().and(0xFF).toString(16).uppercase().padStart(2, '0') }
-        send("u$txHex $rxHex ${data.size} $dataHex\n")
+        // Not available in SLCAN mode - send as single frame if <= 8 bytes
+        if (data.size <= 8) {
+            sendCanFrame(txId, data)
+        }
     }
 
-    // Convenience overload for ECU requests
     fun sendIsoTp(requestId: Int, data: ByteArray) {
-        // Standard OBD-II: Response ID is Request ID + 8
         val responseId = requestId + 8
         sendIsoTp(requestId.toLong(), responseId.toLong(), data)
     }
 
     fun setBaudrate(baudrate: Int) {
-        send("b$baudrate\n")
+        // SLCAN bitrate codes S0-S8
+        val code = when (baudrate) {
+            10000 -> "S0"
+            20000 -> "S1"
+            50000 -> "S2"
+            100000 -> "S3"
+            125000 -> "S4"
+            250000 -> "S5"
+            500000 -> "S6"
+            800000 -> "S7"
+            1000000 -> "S8"
+            else -> "S6"  // Default 500k
+        }
+        send("$code\r")
     }
 
+    fun openCan() {
+        send("O\r")  // SLCAN: Open CAN
+    }
+
+    fun closeCan() {
+        send("C\r")  // SLCAN: Close CAN
+    }
+
+    // SLCAN has no logging toggle - data flows automatically when CAN is open
+    // These are kept for API compatibility but do nothing
     fun startLogging() {
-        send("l1\n")
+        // No-op in SLCAN mode
     }
 
     fun stopLogging() {
-        send("l0\n")
+        // No-op in SLCAN mode
     }
 
     fun setLoopback(enabled: Boolean) {
-        send(if (enabled) "k1\n" else "k0\n")
+        send(if (enabled) "K1\r" else "K0\r")  // Custom extension
     }
 
     fun getStatus() {
-        send("?\n")
+        send("F\r")  // SLCAN: Status flags
     }
 
     fun getInfo() {
-        send("i\n")
+        send("V\r")  // SLCAN: Version
     }
 
     fun disconnect() {
@@ -408,7 +441,16 @@ class UsbSerialManager(private val context: Context) {
             _isSimulationMode.value = false
         }
 
-        // Stop USB connection if active
+        // SLCAN: Close CAN before disconnecting
+        try {
+            serialPort?.write("C\r".toByteArray(), 100)
+            Thread.sleep(50)  // Give firmware time to process
+            Log.d(TAG, "Sent SLCAN close command")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to send SLCAN close command", e)
+        }
+
+        // Stop USB connection
         ioManager?.stop()
         ioManager = null
 

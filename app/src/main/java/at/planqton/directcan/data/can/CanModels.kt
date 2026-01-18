@@ -11,7 +11,8 @@ data class CanFrame(
     val isExtended: Boolean = false,
     val isRtr: Boolean = false,
     val direction: Direction = Direction.RX,
-    val bus: Int = 0
+    val bus: Int = 0,
+    val port: Int = 1  // Port 1 or 2 for multi-device support
 ) {
     enum class Direction { TX, RX }
 
@@ -73,64 +74,127 @@ data class CanFrame(
         private const val MAX_CAN_DATA_LENGTH = 8           // Standard CAN
         private const val MAX_CANFD_DATA_LENGTH = 64        // CAN-FD
 
-        fun fromTextLine(line: String): CanFrame? {
-            // Format: t<timestamp> <id>[X][R] <len> <byte0> <byte1> ...
-            if (!line.startsWith("t")) return null
+        /**
+         * Parse SLCAN/LAWICEL format line
+         * Format:
+         *   t<id:3><len:1><data:2*len>  - Standard frame (11-bit ID)
+         *   T<id:8><len:1><data:2*len>  - Extended frame (29-bit ID)
+         *   r<id:3><len:1>              - Standard RTR
+         *   R<id:8><len:1>              - Extended RTR
+         *
+         * Examples:
+         *   t1238AABBCCDDEEFF0011  - Standard: ID=0x123, Len=8, Data=AA BB CC DD EE FF 00 11
+         *   T000001238AABBCCDD     - Extended: ID=0x00000123, Len=8
+         *   r1230                  - Standard RTR: ID=0x123, Len=0
+         */
+        fun fromTextLine(line: String, port: Int = 1): CanFrame? {
+            if (line.isEmpty()) return null
 
-            try {
-                val parts = line.substring(1).split(" ")
-                if (parts.size < 3) return null
+            val type = line[0]
 
-                val timestamp = parts[0].toLongOrNull() ?: return null
-
-                var idStr = parts[1]
-                val isExtended = idStr.endsWith("X")
-                val isRtr = idStr.endsWith("R") || idStr.endsWith("XR")
-                idStr = idStr.replace("X", "").replace("R", "")
-                val id = idStr.toLongOrNull(16) ?: return null
-
-                // Validate CAN ID
-                val maxId = if (isExtended) MAX_EXTENDED_ID else MAX_STANDARD_ID
-                if (id < 0 || id > maxId) {
-                    android.util.Log.w("CanFrame", "Invalid CAN ID: 0x${id.toString(16)} (max: 0x${maxId.toString(16)})")
-                    return null
+            return try {
+                when (type) {
+                    't' -> parseSlcanStandard(line, port, rtr = false)
+                    'T' -> parseSlcanExtended(line, port, rtr = false)
+                    'r' -> parseSlcanStandard(line, port, rtr = true)
+                    'R' -> parseSlcanExtended(line, port, rtr = true)
+                    else -> null
                 }
-
-                val len = parts[2].toIntOrNull() ?: return null
-
-                // Validate data length
-                if (len < 0 || len > MAX_CANFD_DATA_LENGTH) {
-                    android.util.Log.w("CanFrame", "Invalid data length: $len for ID 0x${id.toString(16)}")
-                    return null
-                }
-
-                val data = ByteArray(len)
-
-                for (i in 0 until len) {
-                    if (i + 3 < parts.size) {
-                        data[i] = parts[i + 3].toIntOrNull(16)?.toByte() ?: 0
-                    }
-                }
-
-                return CanFrame(
-                    timestamp = timestamp,
-                    id = id,
-                    data = data,
-                    isExtended = isExtended,
-                    isRtr = isRtr
-                )
             } catch (e: Exception) {
-                android.util.Log.e("CanFrame", "Error parsing line: $line", e)
-                return null
+                android.util.Log.e("CanFrame", "Error parsing SLCAN line: $line", e)
+                null
             }
         }
 
-        fun create(id: Long, data: ByteArray, extended: Boolean = false): CanFrame {
+        private fun parseSlcanStandard(line: String, port: Int, rtr: Boolean): CanFrame? {
+            // t<id:3><len:1><data:2*len> or r<id:3><len:1>
+            // Minimum length: 1 (type) + 3 (id) + 1 (len) = 5
+            if (line.length < 5) return null
+
+            val idStr = line.substring(1, 4)
+            val id = idStr.toLongOrNull(16) ?: return null
+
+            if (id < 0 || id > MAX_STANDARD_ID) {
+                android.util.Log.w("CanFrame", "Invalid standard CAN ID: 0x${id.toString(16)}")
+                return null
+            }
+
+            val len = line[4].digitToIntOrNull() ?: return null
+            if (len < 0 || len > MAX_CAN_DATA_LENGTH) {
+                android.util.Log.w("CanFrame", "Invalid data length: $len")
+                return null
+            }
+
+            val data = if (rtr) {
+                ByteArray(0)  // RTR has no data
+            } else {
+                parseSlcanData(line.substring(5), len) ?: return null
+            }
+
             return CanFrame(
                 timestamp = System.currentTimeMillis() * 1000,
                 id = id,
                 data = data,
-                isExtended = extended
+                isExtended = false,
+                isRtr = rtr,
+                port = port
+            )
+        }
+
+        private fun parseSlcanExtended(line: String, port: Int, rtr: Boolean): CanFrame? {
+            // T<id:8><len:1><data:2*len> or R<id:8><len:1>
+            // Minimum length: 1 (type) + 8 (id) + 1 (len) = 10
+            if (line.length < 10) return null
+
+            val idStr = line.substring(1, 9)
+            val id = idStr.toLongOrNull(16) ?: return null
+
+            if (id < 0 || id > MAX_EXTENDED_ID) {
+                android.util.Log.w("CanFrame", "Invalid extended CAN ID: 0x${id.toString(16)}")
+                return null
+            }
+
+            val len = line[9].digitToIntOrNull() ?: return null
+            if (len < 0 || len > MAX_CAN_DATA_LENGTH) {
+                android.util.Log.w("CanFrame", "Invalid data length: $len")
+                return null
+            }
+
+            val data = if (rtr) {
+                ByteArray(0)  // RTR has no data
+            } else {
+                parseSlcanData(line.substring(10), len) ?: return null
+            }
+
+            return CanFrame(
+                timestamp = System.currentTimeMillis() * 1000,
+                id = id,
+                data = data,
+                isExtended = true,
+                isRtr = rtr,
+                port = port
+            )
+        }
+
+        private fun parseSlcanData(hexString: String, expectedLen: Int): ByteArray? {
+            if (hexString.length < expectedLen * 2) return null
+
+            return try {
+                ByteArray(expectedLen) { i ->
+                    hexString.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        fun create(id: Long, data: ByteArray, extended: Boolean = false, port: Int = 1): CanFrame {
+            return CanFrame(
+                timestamp = System.currentTimeMillis() * 1000,
+                id = id,
+                data = data,
+                isExtended = extended,
+                port = port
             )
         }
     }

@@ -2,6 +2,7 @@ package at.planqton.directcan.data.txscript
 
 import android.util.Log
 import at.planqton.directcan.data.can.CanDataRepository
+import at.planqton.directcan.data.device.DeviceManager
 import at.planqton.directcan.data.txscript.parser.parseScript
 import at.planqton.directcan.data.usb.UsbSerialManager
 import kotlinx.coroutines.*
@@ -14,8 +15,11 @@ private const val TAG = "TxScriptExecutor"
 
 class TxScriptExecutor(
     private val usbManager: UsbSerialManager,
-    private val canDataRepository: CanDataRepository
+    private val canDataRepository: CanDataRepository,
+    private val deviceManager: DeviceManager? = null
 ) {
+    // Target ports for multi-port support
+    private var targetPorts: Set<Int> = setOf(1, 2)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // State
@@ -45,8 +49,9 @@ class TxScriptExecutor(
     /**
      * Start executing a script.
      */
-    fun start(script: TxScript): Result<Unit> {
-        Log.i(TAG, "Starting script: ${script.name}")
+    fun start(script: TxScript, ports: Set<Int> = setOf(1, 2)): Result<Unit> {
+        Log.i(TAG, "Starting script: ${script.name} on ports: $ports")
+        targetPorts = ports
 
         // Check connection
         if (usbManager.connectionState.value != UsbSerialManager.ConnectionState.CONNECTED &&
@@ -242,7 +247,25 @@ class TxScriptExecutor(
         )
 
         try {
-            usbManager.sendCanFrame(canId, data, command.extended)
+            // Use multi-port sending if deviceManager is available and has multiple connections
+            if (deviceManager != null && deviceManager.connectedDeviceCount.value > 1) {
+                // Build frame string for sending
+                val frameStr = buildString {
+                    append(canId.toString(16).uppercase())
+                    if (command.extended) append("X")
+                    if (data.isNotEmpty()) {
+                        append("#")
+                        append(data.joinToString("") { "%02X".format(it) })
+                    }
+                }
+                val portsToSend = targetPorts.filter { deviceManager.activeDevices.value.containsKey(it) }.toSet()
+                if (portsToSend.isNotEmpty()) {
+                    deviceManager.sendToPorts(portsToSend, frameStr)
+                }
+            } else {
+                // Single device - use legacy method
+                usbManager.sendCanFrame(canId, data, command.extended)
+            }
             updateState { copy(framesSent = framesSent + 1) }
         } catch (e: Exception) {
             error("Send failed: ${e.message}", command.line, ErrorType.SEND_ERROR)

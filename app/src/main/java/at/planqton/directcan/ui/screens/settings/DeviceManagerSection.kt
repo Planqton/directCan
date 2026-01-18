@@ -162,9 +162,8 @@ private fun DeviceListItem(
     onDelete: () -> Unit
 ) {
     val icon = when (config.type) {
-        DeviceType.USB_SERIAL -> Icons.Default.Usb
+        DeviceType.USB_SLCAN -> Icons.Default.Usb
         DeviceType.SIMULATOR -> Icons.Default.DirectionsCar
-        DeviceType.PEAK_CAN -> Icons.Default.Router
     }
 
     val statusColor = when (connectionState) {
@@ -278,20 +277,15 @@ private fun AddDeviceDialog(
 
                     DeviceType.entries.forEach { type ->
                         val (icon, name, description) = when (type) {
-                            DeviceType.USB_SERIAL -> Triple(
+                            DeviceType.USB_SLCAN -> Triple(
                                 Icons.Default.Usb,
-                                "USB Serial",
-                                "USB-to-Serial CAN Adapter"
+                                "USB SLCAN",
+                                "USB SLCAN/LAWICEL CAN Adapter"
                             )
                             DeviceType.SIMULATOR -> Triple(
                                 Icons.Default.DirectionsCar,
                                 "Simulator",
                                 "Simulierte Fahrzeugdaten"
-                            )
-                            DeviceType.PEAK_CAN -> Triple(
-                                Icons.Default.Router,
-                                "PEAK CAN",
-                                "PEAK PCAN-USB Adapter"
                             )
                         }
 
@@ -305,7 +299,7 @@ private fun AddDeviceDialog(
                 } else {
                     // Type-specific config
                     when (selectedType) {
-                        DeviceType.USB_SERIAL -> UsbSerialConfigForm(
+                        DeviceType.USB_SLCAN -> UsbSlcanConfigForm(
                             onSave = { onAdd(it) },
                             onBack = { selectedType = null }
                         )
@@ -315,10 +309,6 @@ private fun AddDeviceDialog(
                                 onAdd(SimulatorConfig())
                             }
                         }
-                        DeviceType.PEAK_CAN -> PeakCanConfigForm(
-                            onSave = { onAdd(it) },
-                            onBack = { selectedType = null }
-                        )
                         null -> {}
                     }
                 }
@@ -336,12 +326,12 @@ private fun AddDeviceDialog(
 }
 
 @Composable
-private fun UsbSerialConfigForm(
-    initialConfig: UsbSerialConfig? = null,
-    onSave: (UsbSerialConfig) -> Unit,
+private fun UsbSlcanConfigForm(
+    initialConfig: UsbSlcanConfig? = null,
+    onSave: (UsbSlcanConfig) -> Unit,
     onBack: () -> Unit
 ) {
-    var name by remember { mutableStateOf(initialConfig?.name ?: "USB Serial") }
+    var name by remember { mutableStateOf(initialConfig?.name ?: "USB SLCAN") }
     var baudRate by remember { mutableStateOf(initialConfig?.baudRate?.toString() ?: "2000000") }
     var autoDetect by remember { mutableStateOf(initialConfig?.vendorId == null) }
 
@@ -385,89 +375,12 @@ private fun UsbSerialConfigForm(
             }
             Button(
                 onClick = {
-                    val config = UsbSerialConfig(
+                    val config = UsbSlcanConfig(
                         id = initialConfig?.id ?: DeviceConfig.generateId(),
                         name = name,
                         baudRate = baudRate.toIntOrNull() ?: 2000000,
                         vendorId = if (autoDetect) null else initialConfig?.vendorId,
                         productId = if (autoDetect) null else initialConfig?.productId
-                    )
-                    onSave(config)
-                },
-                enabled = name.isNotBlank()
-            ) {
-                Text("Speichern")
-            }
-        }
-    }
-}
-
-@Composable
-private fun PeakCanConfigForm(
-    initialConfig: PeakCanConfig? = null,
-    onSave: (PeakCanConfig) -> Unit,
-    onBack: () -> Unit
-) {
-    var name by remember { mutableStateOf(initialConfig?.name ?: "PEAK CAN") }
-    var channel by remember { mutableStateOf(initialConfig?.channel?.toString() ?: "1") }
-    var bitrate by remember { mutableStateOf(initialConfig?.bitrate?.toString() ?: "500000") }
-
-    val bitrateOptions = listOf(
-        "125000" to "125 kbit/s",
-        "250000" to "250 kbit/s",
-        "500000" to "500 kbit/s",
-        "1000000" to "1 Mbit/s"
-    )
-
-    Column {
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text("Name") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = channel,
-            onValueChange = { channel = it.filter { c -> c.isDigit() } },
-            label = { Text("Kanal") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        Text("Bitrate:", style = MaterialTheme.typography.bodySmall)
-        bitrateOptions.forEach { (value, label) ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable { bitrate = value }
-            ) {
-                RadioButton(
-                    selected = bitrate == value,
-                    onClick = { bitrate = value }
-                )
-                Text(label)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            TextButton(onClick = onBack) {
-                Text("Zurück")
-            }
-            Button(
-                onClick = {
-                    val config = PeakCanConfig(
-                        id = initialConfig?.id ?: DeviceConfig.generateId(),
-                        name = name,
-                        channel = channel.toIntOrNull() ?: 1,
-                        bitrate = bitrate.toIntOrNull() ?: 500000
                     )
                     onSave(config)
                 },
@@ -490,12 +403,7 @@ private fun EditDeviceDialog(
         title = { Text("Gerät bearbeiten") },
         text = {
             when (config) {
-                is UsbSerialConfig -> UsbSerialConfigForm(
-                    initialConfig = config,
-                    onSave = onSave,
-                    onBack = onDismiss
-                )
-                is PeakCanConfig -> PeakCanConfigForm(
+                is UsbSlcanConfig -> UsbSlcanConfigForm(
                     initialConfig = config,
                     onSave = onSave,
                     onBack = onDismiss

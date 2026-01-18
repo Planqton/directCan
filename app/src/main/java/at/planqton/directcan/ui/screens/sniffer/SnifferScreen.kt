@@ -19,11 +19,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import at.planqton.directcan.DirectCanApplication
 import at.planqton.directcan.data.can.CanFrame
 import at.planqton.directcan.data.device.ConnectionState
+import at.planqton.directcan.data.settings.SettingsRepository
 import at.planqton.directcan.data.usb.UsbSerialManager
 import kotlinx.coroutines.delay
 
@@ -39,8 +41,25 @@ fun SnifferScreen() {
     val usbManager = DirectCanApplication.instance.usbSerialManager
     val canDataRepository = DirectCanApplication.instance.canDataRepository
     val deviceManager = DirectCanApplication.instance.deviceManager
+    val settingsRepository = DirectCanApplication.instance.settingsRepository
     val connectionState by deviceManager.connectionState.collectAsState()
     val isLogging by canDataRepository.isLogging.collectAsState()
+
+    // Multi-port support
+    val connectedDeviceCount by deviceManager.connectedDeviceCount.collectAsState()
+    val showPortColumn = connectedDeviceCount > 1
+    val port1Color by settingsRepository.port1Color.collectAsState(initial = SettingsRepository.DEFAULT_PORT_1_COLOR)
+    val port2Color by settingsRepository.port2Color.collectAsState(initial = SettingsRepository.DEFAULT_PORT_2_COLOR)
+    var portFilter by remember { mutableStateOf(setOf(1, 2)) }
+
+    // Helper function to get port color
+    fun getPortColor(port: Int): Color {
+        return when (port) {
+            1 -> Color(port1Color.toInt())
+            2 -> Color(port2Color.toInt())
+            else -> Color.Gray
+        }
+    }
 
     // Use centrally collected sniffer data from repository
     val snifferFrames by canDataRepository.snifferFrames.collectAsState()
@@ -62,10 +81,11 @@ fun SnifferScreen() {
     // Zeitfenster für Farbänderungen (ms) - aus Slider
     val changeHighlightDuration by remember { derivedStateOf { highlightDurationMs.toLong() } }
 
-    // Build display list from repository data, applying shared filter
-    val displayList = remember(snifferFrames, frameFilter) {
+    // Build display list from repository data, applying shared filter and port filter
+    val displayList = remember(snifferFrames, frameFilter, portFilter, showPortColumn) {
         snifferFrames.values
             .filter { frameFilter[it.id] ?: true }  // Show if enabled or not in filter map
+            .filter { !showPortColumn || portFilter.contains(it.port) }  // Apply port filter when multi-port
             .sortedBy { it.id }
             .toList()
     }
@@ -111,6 +131,10 @@ fun SnifferScreen() {
                     .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // IO column (only show when multiple devices connected)
+                if (showPortColumn) {
+                    Text("IO", Modifier.width(32.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
                 Text("ID", Modifier.width(70.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Text("Count", Modifier.width(70.dp), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 Text(if (viewBits) "Data (Bits)" else "Data (Bytes)", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
@@ -139,9 +163,10 @@ fun SnifferScreen() {
                     }
                 } else {
                     LazyColumn(Modifier.fillMaxSize()) {
-                        items(displayList, key = { it.id }) { data ->
+                        items(displayList, key = { "${it.id}_${it.port}" }) { data ->
                             val now = System.currentTimeMillis()
                             val isStale = now - data.lastUpdate > 1000
+                            val portColor = getPortColor(data.port)
 
                             Row(
                                 modifier = Modifier
@@ -149,6 +174,28 @@ fun SnifferScreen() {
                                     .padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // IO (Port number) - only show when multiple devices connected
+                                if (showPortColumn) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(32.dp)
+                                            .background(
+                                                portColor.copy(alpha = 0.2f),
+                                                RoundedCornerShape(4.dp)
+                                            )
+                                            .padding(vertical = 2.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            "${data.port}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            color = portColor,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
                                 // ID
                                 Row(Modifier.width(70.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Text(
@@ -377,6 +424,68 @@ fun SnifferScreen() {
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
+
+                // Port Filtering (only show when multiple devices connected)
+                if (showPortColumn) {
+                    Text(
+                        "Port Filter:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        FilterChip(
+                            selected = 1 in portFilter,
+                            onClick = {
+                                portFilter = if (1 in portFilter) {
+                                    if (portFilter.size > 1) portFilter - 1 else portFilter
+                                } else {
+                                    portFilter + 1
+                                }
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(getPortColor(1), RoundedCornerShape(2.dp))
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("P1", fontSize = 10.sp)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = 2 in portFilter,
+                            onClick = {
+                                portFilter = if (2 in portFilter) {
+                                    if (portFilter.size > 1) portFilter - 2 else portFilter
+                                } else {
+                                    portFilter + 2
+                                }
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(getPortColor(2), RoundedCornerShape(2.dp))
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("P2", fontSize = 10.sp)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                }
 
                 // Frame Filtering - same UI as MonitorScreen
                 Text(

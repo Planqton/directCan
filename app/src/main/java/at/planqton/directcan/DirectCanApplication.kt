@@ -63,8 +63,8 @@ class DirectCanApplication : Application() {
         canDataRepository = CanDataRepository(this)
         aiChatRepository = AiChatRepository(this)
         txScriptRepository = TxScriptRepository(this)
-        txScriptExecutor = TxScriptExecutor(usbSerialManager, canDataRepository)
         deviceManager = DeviceManager(this)
+        txScriptExecutor = TxScriptExecutor(usbSerialManager, canDataRepository, deviceManager)
         Log.d(TAG, "All repositories initialized")
 
         // Install default DBC files and restore settings on startup
@@ -112,12 +112,16 @@ class DirectCanApplication : Application() {
         }
 
         // Collect CAN frames centrally - feeds Monitor, Sniffer, and Snapshot data
-        // Use DeviceManager for all device connections (USB Serial, Simulator, PEAK CAN)
+        // Use DeviceManager for all device connections (USB SLCAN, Simulator)
+        // Use receivedLinesWithPort for proper multi-port support
         scope.launch {
-            deviceManager.receivedLines.collect { line ->
-                CanFrame.fromTextLine(line)?.let { frame ->
+            Log.d(TAG, "Starting receivedLinesWithPort collector")
+            deviceManager.receivedLinesWithPort.collect { (port, line) ->
+                Log.v(TAG, "Received from port $port: ${line.take(50)}")
+                CanFrame.fromTextLine(line, port)?.let { frame ->
+                    Log.d(TAG, "Parsed frame: ID=${frame.idHex}, port=$port")
                     canDataRepository.processFrame(frame)
-                }
+                } ?: Log.w(TAG, "Failed to parse line: ${line.take(50)}")
             }
         }
 

@@ -4,13 +4,16 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import at.planqton.directcan.data.txscript.ScriptExecutionState
@@ -25,13 +28,27 @@ fun ScriptControlPanel(
     selectedScript: TxScriptFileInfo?,
     executionState: ScriptExecutionState,
     onSelectScript: (TxScriptFileInfo?) -> Unit,
-    onStart: () -> Unit,
+    onStart: (Set<Int>) -> Unit,  // Now accepts target ports
     onPause: () -> Unit,
     onResume: () -> Unit,
     onStop: () -> Unit,
     onShowErrors: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Multi-port support
+    showPortSelection: Boolean = false,
+    port1Color: Color = Color(0xFF4CAF50),
+    port2Color: Color = Color(0xFF2196F3)
 ) {
+    // Script port selection state
+    var scriptPorts by remember { mutableStateOf(setOf(1, 2)) }
+
+    fun getPortColor(port: Int): Color {
+        return when (port) {
+            1 -> port1Color
+            2 -> port2Color
+            else -> Color.Gray
+        }
+    }
     AnimatedVisibility(
         visible = isExpanded,
         enter = expandVertically(),
@@ -68,6 +85,64 @@ fun ScriptControlPanel(
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
+
+                // Port selection (only when multi-port)
+                if (showPortSelection) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Senden an:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        FilterChip(
+                            selected = 1 in scriptPorts,
+                            onClick = {
+                                scriptPorts = if (1 in scriptPorts) {
+                                    if (scriptPorts.size > 1) scriptPorts - 1 else scriptPorts
+                                } else {
+                                    scriptPorts + 1
+                                }
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(getPortColor(1), RoundedCornerShape(2.dp))
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("P1")
+                                }
+                            }
+                        )
+                        FilterChip(
+                            selected = 2 in scriptPorts,
+                            onClick = {
+                                scriptPorts = if (2 in scriptPorts) {
+                                    if (scriptPorts.size > 1) scriptPorts - 2 else scriptPorts
+                                } else {
+                                    scriptPorts + 2
+                                }
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .background(getPortColor(2), RoundedCornerShape(2.dp))
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("P2")
+                                }
+                            }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
 
                 // Script selector and controls
                 Row(
@@ -140,7 +215,7 @@ fun ScriptControlPanel(
                         ScriptState.IDLE, ScriptState.STOPPED, ScriptState.COMPLETED, ScriptState.ERROR -> {
                             // Play button
                             FilledIconButton(
-                                onClick = onStart,
+                                onClick = { onStart(scriptPorts) },
                                 enabled = selectedScript != null,
                                 colors = IconButtonDefaults.filledIconButtonColors(
                                     containerColor = MaterialTheme.colorScheme.primary

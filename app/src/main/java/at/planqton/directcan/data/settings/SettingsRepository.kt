@@ -34,6 +34,15 @@ class SettingsRepository(private val context: Context) {
         // Dev settings
         val DEV_LOG_ENABLED = booleanPreferencesKey("dev_log_enabled")
         val DEV_LOG_INTERVAL_MINUTES = intPreferencesKey("dev_log_interval_minutes")
+        // Port colors (stored as ARGB Long)
+        val PORT_1_COLOR = longPreferencesKey("port_1_color")
+        val PORT_2_COLOR = longPreferencesKey("port_2_color")
+    }
+
+    // Default port colors
+    companion object {
+        const val DEFAULT_PORT_1_COLOR = 0xFF4CAF50L  // Green
+        const val DEFAULT_PORT_2_COLOR = 0xFF2196F3L  // Blue
     }
 
     // Language setting: "system", "en", "de"
@@ -172,4 +181,24 @@ class SettingsRepository(private val context: Context) {
             emptyMap()
         }
     }
+
+    // Port color settings
+    val port1Color: Flow<Long> = context.dataStore.data.map {
+        it[Keys.PORT_1_COLOR] ?: DEFAULT_PORT_1_COLOR
+    }
+
+    val port2Color: Flow<Long> = context.dataStore.data.map {
+        it[Keys.PORT_2_COLOR] ?: DEFAULT_PORT_2_COLOR
+    }
+
+    suspend fun setPort1Color(color: Long) {
+        context.dataStore.edit { it[Keys.PORT_1_COLOR] = color }
+    }
+
+    suspend fun setPort2Color(color: Long) {
+        context.dataStore.edit { it[Keys.PORT_2_COLOR] = color }
+    }
+
+    suspend fun getPort1ColorSync(): Long = context.dataStore.data.first()[Keys.PORT_1_COLOR] ?: DEFAULT_PORT_1_COLOR
+    suspend fun getPort2ColorSync(): Long = context.dataStore.data.first()[Keys.PORT_2_COLOR] ?: DEFAULT_PORT_2_COLOR
 }

@@ -37,8 +37,12 @@ class CanDataRepository(private val context: Context) {
 
     // Frame buffer for monitor
     private val monitorFrameBuffer = mutableListOf<CanFrame>()
-    private val monitorIdIndex = mutableMapOf<Long, Int>()
+    // Key: combines CAN ID and port for multi-port support (id * 10 + port)
+    private val monitorIdPortIndex = mutableMapOf<Long, Int>()
     private var _overwriteMode = true
+
+    // Helper to create unique key from ID and port
+    private fun makeIdPortKey(id: Long, port: Int): Long = id * 10 + port
 
     // Sniffer data - Map of ID to sniffer frame data
     private val _snifferFrames = MutableStateFlow<Map<Long, SnifferFrameData>>(emptyMap())
@@ -297,11 +301,13 @@ class CanDataRepository(private val context: Context) {
 
     private fun updateMonitorFrame(frame: CanFrame) {
         if (_overwriteMode) {
-            val existingIndex = monitorIdIndex[frame.id]
+            // Use combined key of ID + port so same ID on different ports shows separately
+            val key = makeIdPortKey(frame.id, frame.port)
+            val existingIndex = monitorIdPortIndex[key]
             if (existingIndex != null && existingIndex < monitorFrameBuffer.size) {
                 monitorFrameBuffer[existingIndex] = frame
             } else {
-                monitorIdIndex[frame.id] = monitorFrameBuffer.size
+                monitorIdPortIndex[key] = monitorFrameBuffer.size
                 monitorFrameBuffer.add(frame)
             }
         } else {
@@ -310,12 +316,12 @@ class CanDataRepository(private val context: Context) {
                 repeat(500) {
                     if (monitorFrameBuffer.isNotEmpty()) {
                         val removed = monitorFrameBuffer.removeAt(0)
-                        monitorIdIndex.remove(removed.id)
+                        monitorIdPortIndex.remove(makeIdPortKey(removed.id, removed.port))
                     }
                 }
-                monitorIdIndex.clear()
+                monitorIdPortIndex.clear()
                 monitorFrameBuffer.forEachIndexed { idx, f ->
-                    monitorIdIndex[f.id] = idx
+                    monitorIdPortIndex[makeIdPortKey(f.id, f.port)] = idx
                 }
             }
         }
@@ -349,7 +355,8 @@ class CanDataRepository(private val context: Context) {
                 byteChangeDir = newChangeDir,
                 notchedBits = existing.notchedBits,
                 lastUpdate = now,
-                updateCount = existing.updateCount + 1
+                updateCount = existing.updateCount + 1,
+                port = frame.port
             )
         } else {
             snifferDataMap[frame.id] = SnifferFrameData(
@@ -360,7 +367,8 @@ class CanDataRepository(private val context: Context) {
                 byteChangeDir = IntArray(8) { 0 },
                 notchedBits = BooleanArray(64) { false },
                 lastUpdate = now,
-                updateCount = 1
+                updateCount = 1,
+                port = frame.port
             )
         }
     }
@@ -368,7 +376,7 @@ class CanDataRepository(private val context: Context) {
     fun clearMonitorFrames() {
         Log.d(TAG, "Clearing monitor frames (was ${monitorFrameBuffer.size} frames)")
         monitorFrameBuffer.clear()
-        monitorIdIndex.clear()
+        monitorIdPortIndex.clear()
         _monitorFrames.value = emptyList()
         _totalFramesCaptured.value = 0
     }
@@ -391,7 +399,8 @@ class CanDataRepository(private val context: Context) {
             isExtended = frame.isExtended,
             isRtr = frame.isRtr,
             direction = frame.direction,
-            bus = frame.bus
+            bus = frame.bus,
+            port = frame.port
         )
         _currentFrames.value = current
     }
@@ -590,12 +599,22 @@ class CanDataRepository(private val context: Context) {
     /**
      * Capture snapshot data immediately (before dialog)
      * Returns the captured data that can be saved later
+     * @param ports Set of ports to include (1, 2, or both). If empty or null, includes all.
      */
-    fun captureSnapshot(): SnapshotData {
-        val frames = _currentFrames.value.toMap()
+    fun captureSnapshot(ports: Set<Int>? = null): SnapshotData {
+        val allFrames = _currentFrames.value.toMap()
         val timestamp = System.currentTimeMillis()
-        Log.i(TAG, "Snapshot captured: ${frames.size} frames")
-        return SnapshotData(frames, timestamp)
+
+        // Filter by port if specified
+        val filteredFrames = if (ports != null && ports.isNotEmpty()) {
+            allFrames.filter { (_, frameData) -> frameData.port in ports }
+        } else {
+            allFrames
+        }
+
+        val usedPorts = ports ?: setOf(1, 2)
+        Log.i(TAG, "Snapshot captured: ${filteredFrames.size} frames (ports: $usedPorts)")
+        return SnapshotData(filteredFrames, timestamp, usedPorts)
     }
 
     /**
@@ -673,18 +692,20 @@ class CanDataRepository(private val context: Context) {
         val isExtended: Boolean,
         val isRtr: Boolean,
         val direction: CanFrame.Direction,
-        val bus: Int
+        val bus: Int,
+        val port: Int = 1  // Port 1 or 2 for multi-device support
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
             other as CanFrameData
-            return id == other.id && data.contentEquals(other.data)
+            return id == other.id && data.contentEquals(other.data) && port == other.port
         }
 
         override fun hashCode(): Int {
             var result = id.hashCode()
             result = 31 * result + data.contentHashCode()
+            result = 31 * result + port
             return result
         }
     }
@@ -713,7 +734,8 @@ class CanDataRepository(private val context: Context) {
      */
     data class SnapshotData(
         val frames: Map<Long, CanFrameData>,
-        val captureTime: Long
+        val captureTime: Long,
+        val ports: Set<Int> = setOf(1, 2)  // Which ports were included
     )
 
     /**
@@ -727,18 +749,20 @@ class CanDataRepository(private val context: Context) {
         val byteChangeDir: IntArray,
         val notchedBits: BooleanArray,
         val lastUpdate: Long,
-        val updateCount: Long
+        val updateCount: Long,
+        val port: Int = 1  // Port 1 or 2 for multi-device support
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (javaClass != other?.javaClass) return false
             other as SnifferFrameData
-            return id == other.id && updateCount == other.updateCount
+            return id == other.id && updateCount == other.updateCount && port == other.port
         }
 
         override fun hashCode(): Int {
             var result = id.hashCode()
             result = 31 * result + updateCount.hashCode()
+            result = 31 * result + port
             return result
         }
     }

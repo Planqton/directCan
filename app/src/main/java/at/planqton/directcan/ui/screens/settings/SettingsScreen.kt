@@ -4,9 +4,13 @@ import android.app.Activity
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -14,12 +18,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import at.planqton.directcan.DirectCanApplication
 import at.planqton.directcan.R
+import at.planqton.directcan.data.settings.SettingsRepository
 import at.planqton.directcan.util.LocaleHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,6 +65,12 @@ fun SettingsScreen(
     val devLogEnabled by settingsRepository.devLogEnabled.collectAsState(initial = true)
     val devLogIntervalMinutes by settingsRepository.devLogIntervalMinutes.collectAsState(initial = 5)
     var showDevLogIntervalDialog by remember { mutableStateOf(false) }
+
+    // Port color settings
+    val port1Color by settingsRepository.port1Color.collectAsState(initial = SettingsRepository.DEFAULT_PORT_1_COLOR)
+    val port2Color by settingsRepository.port2Color.collectAsState(initial = SettingsRepository.DEFAULT_PORT_2_COLOR)
+    var showPort1ColorPicker by remember { mutableStateOf(false) }
+    var showPort2ColorPicker by remember { mutableStateOf(false) }
 
     // Folder picker launcher
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -168,6 +180,27 @@ fun SettingsScreen(
                     subtitle = "Daten in Hex statt Dezimal anzeigen",
                     checked = hexDisplay,
                     onCheckedChange = { hexDisplay = it }
+                )
+            }
+
+            // Multi-Port Colors Section
+            item {
+                SettingsSectionHeader("Multi-Port Farben")
+            }
+
+            item {
+                PortColorSettingsItem(
+                    port = 1,
+                    color = Color(port1Color.toInt()),
+                    onClick = { showPort1ColorPicker = true }
+                )
+            }
+
+            item {
+                PortColorSettingsItem(
+                    port = 2,
+                    color = Color(port2Color.toInt()),
+                    onClick = { showPort2ColorPicker = true }
                 )
             }
 
@@ -337,6 +370,32 @@ fun SettingsScreen(
                 showDevLogIntervalDialog = false
             },
             onDismiss = { showDevLogIntervalDialog = false }
+        )
+    }
+
+    // Port 1 Color Picker Dialog
+    if (showPort1ColorPicker) {
+        PortColorPickerDialog(
+            port = 1,
+            currentColor = Color(port1Color.toInt()),
+            onColorSelected = { color ->
+                scope.launch { settingsRepository.setPort1Color(color.value.toLong()) }
+                showPort1ColorPicker = false
+            },
+            onDismiss = { showPort1ColorPicker = false }
+        )
+    }
+
+    // Port 2 Color Picker Dialog
+    if (showPort2ColorPicker) {
+        PortColorPickerDialog(
+            port = 2,
+            currentColor = Color(port2Color.toInt()),
+            onColorSelected = { color ->
+                scope.launch { settingsRepository.setPort2Color(color.value.toLong()) }
+                showPort2ColorPicker = false
+            },
+            onDismiss = { showPort2ColorPicker = false }
         )
     }
 }
@@ -596,6 +655,104 @@ fun DevLogIntervalDialog(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(label)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Abbrechen")
+            }
+        }
+    )
+}
+
+@Composable
+fun PortColorSettingsItem(
+    port: Int,
+    color: Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Color preview box
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(color, RoundedCornerShape(8.dp))
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Port $port Farbe", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Farbe für Port $port im Monitor/Sniffer",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun PortColorPickerDialog(
+    port: Int,
+    currentColor: Color,
+    onColorSelected: (Color) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val colors = listOf(
+        Color(0xFF4CAF50) to "Grün",
+        Color(0xFF2196F3) to "Blau",
+        Color(0xFFFF9800) to "Orange",
+        Color(0xFF9C27B0) to "Lila",
+        Color(0xFFF44336) to "Rot",
+        Color(0xFF00BCD4) to "Cyan",
+        Color(0xFFFFEB3B) to "Gelb",
+        Color(0xFF795548) to "Braun"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Port $port Farbe wählen") },
+        text = {
+            Column {
+                colors.chunked(4).forEach { row ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        row.forEach { (color, _) ->
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(color, CircleShape)
+                                    .then(
+                                        if (color == currentColor) {
+                                            Modifier.border(
+                                                width = 3.dp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                shape = CircleShape
+                                            )
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .clickable { onColorSelected(color) }
+                            )
+                        }
                     }
                 }
             }
