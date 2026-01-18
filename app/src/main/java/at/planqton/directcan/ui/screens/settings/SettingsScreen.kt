@@ -2,6 +2,7 @@ package at.planqton.directcan.ui.screens.settings
 
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import at.planqton.directcan.DirectCanApplication
 import at.planqton.directcan.R
 import at.planqton.directcan.data.settings.SettingsRepository
+import at.planqton.directcan.data.update.UpdateState
 import at.planqton.directcan.util.LocaleHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,6 +44,10 @@ fun SettingsScreen(
     val logFiles by canDataRepository.logFiles.collectAsState()
     val logDirectoryUri by canDataRepository.logDirectoryUri.collectAsState()
     val txScripts by txScriptRepository.scripts.collectAsState()
+
+    // Update Repository
+    val updateRepository = DirectCanApplication.instance.updateRepository
+    val updateState by updateRepository.updateState.collectAsState()
 
     var selectedBaudrate by remember { mutableIntStateOf(500000) }
     var showBaudrateDialog by remember { mutableStateOf(false) }
@@ -285,10 +291,29 @@ fun SettingsScreen(
             }
 
             item {
+                UpdateSettingsItem(
+                    updateState = updateState,
+                    currentVersion = updateRepository.getCurrentVersion(),
+                    onCheckUpdate = {
+                        scope.launch { updateRepository.checkForUpdates() }
+                    },
+                    onDownload = { url ->
+                        updateRepository.downloadUpdate(url)
+                    },
+                    onInstall = { uri ->
+                        updateRepository.installUpdate(uri)
+                    },
+                    onDismiss = {
+                        updateRepository.resetState()
+                    }
+                )
+            }
+
+            item {
                 SettingsItem(
                     icon = Icons.Default.Info,
                     title = "Über DirectCAN",
-                    subtitle = "Version, Lizenzen und mehr",
+                    subtitle = "Version ${updateRepository.getCurrentVersion()}",
                     onClick = { showAboutDialog = true }
                 )
             }
@@ -746,4 +771,156 @@ fun PortColorPickerDialog(
             }
         }
     )
+}
+
+@Composable
+fun UpdateSettingsItem(
+    updateState: UpdateState,
+    currentVersion: String,
+    onCheckUpdate: () -> Unit,
+    onDownload: (String) -> Unit,
+    onInstall: (android.net.Uri) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var showUpdateDialog by remember { mutableStateOf(false) }
+
+    val (subtitle, isLoading) = when (updateState) {
+        is UpdateState.Idle -> "Version $currentVersion - Tippen zum Prüfen" to false
+        is UpdateState.Checking -> "Prüfe auf Updates..." to true
+        is UpdateState.NoUpdate -> "Aktuell (v$currentVersion)" to false
+        is UpdateState.UpdateAvailable -> "Update verfügbar: v${updateState.info.latestVersion}" to false
+        is UpdateState.Downloading -> "Wird heruntergeladen... ${updateState.progress}%" to true
+        is UpdateState.ReadyToInstall -> "Update bereit zur Installation" to false
+        is UpdateState.Error -> "Fehler: ${updateState.message}" to false
+    }
+
+    // Show dialog when update is available
+    LaunchedEffect(updateState) {
+        if (updateState is UpdateState.UpdateAvailable) {
+            showUpdateDialog = true
+        }
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !isLoading) {
+                when (updateState) {
+                    is UpdateState.Idle, is UpdateState.NoUpdate, is UpdateState.Error -> onCheckUpdate()
+                    is UpdateState.UpdateAvailable -> showUpdateDialog = true
+                    is UpdateState.ReadyToInstall -> onInstall(updateState.apkUri)
+                    else -> {}
+                }
+            }
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                Icon(
+                    when (updateState) {
+                        is UpdateState.UpdateAvailable -> Icons.Default.SystemUpdate
+                        is UpdateState.ReadyToInstall -> Icons.Default.InstallMobile
+                        is UpdateState.Error -> Icons.Default.ErrorOutline
+                        else -> Icons.Default.Update
+                    },
+                    contentDescription = null,
+                    tint = when (updateState) {
+                        is UpdateState.UpdateAvailable -> MaterialTheme.colorScheme.primary
+                        is UpdateState.ReadyToInstall -> Color(0xFF4CAF50)
+                        is UpdateState.Error -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("App-Update", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = when (updateState) {
+                        is UpdateState.UpdateAvailable -> MaterialTheme.colorScheme.primary
+                        is UpdateState.ReadyToInstall -> Color(0xFF4CAF50)
+                        is UpdateState.Error -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+            if (updateState is UpdateState.UpdateAvailable || updateState is UpdateState.ReadyToInstall) {
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+    }
+
+    // Update Available Dialog
+    if (showUpdateDialog && updateState is UpdateState.UpdateAvailable) {
+        AlertDialog(
+            onDismissRequest = {
+                showUpdateDialog = false
+                onDismiss()
+            },
+            icon = { Icon(Icons.Default.SystemUpdate, null) },
+            title = { Text("Update verfügbar") },
+            text = {
+                Column {
+                    Text("Aktuelle Version: v$currentVersion")
+                    Text("Neue Version: v${updateState.info.latestVersion}")
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Größe: ${formatFileSize(updateState.info.fileSize)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    updateState.info.releaseNotes?.let { notes ->
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "Änderungen:",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            notes.take(500),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    showUpdateDialog = false
+                    onDownload(updateState.info.downloadUrl)
+                }) {
+                    Icon(Icons.Default.Download, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Herunterladen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showUpdateDialog = false
+                    onDismiss()
+                }) {
+                    Text("Später")
+                }
+            }
+        )
+    }
+}
+
+private fun formatFileSize(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+        else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+    }
 }

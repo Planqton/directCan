@@ -10,6 +10,7 @@ import at.planqton.directcan.data.gemini.AiChatRepository
 import at.planqton.directcan.data.settings.SettingsRepository
 import at.planqton.directcan.data.txscript.TxScriptExecutor
 import at.planqton.directcan.data.txscript.TxScriptRepository
+import at.planqton.directcan.data.update.UpdateRepository
 import at.planqton.directcan.data.usb.UsbSerialManager
 import at.planqton.directcan.data.device.ConnectionState
 import at.planqton.directcan.data.device.DeviceManager
@@ -51,6 +52,9 @@ class DirectCanApplication : Application() {
         private set
 
     lateinit var deviceManager: DeviceManager
+        private set
+
+    lateinit var updateRepository: UpdateRepository
         private set
 
     // Serial Monitor State
@@ -104,6 +108,7 @@ class DirectCanApplication : Application() {
         txScriptRepository = TxScriptRepository(this)
         deviceManager = DeviceManager(this)
         txScriptExecutor = TxScriptExecutor(usbSerialManager, canDataRepository, deviceManager)
+        updateRepository = UpdateRepository(this)
         Log.d(TAG, "All repositories initialized")
 
         // Install default DBC files and restore settings on startup
@@ -266,6 +271,7 @@ class DirectCanApplication : Application() {
         Log.i(TAG, "Application onTerminate")
         super.onTerminate()
         usbSerialManager.destroy()
+        updateRepository.destroy()
     }
 
     companion object {
