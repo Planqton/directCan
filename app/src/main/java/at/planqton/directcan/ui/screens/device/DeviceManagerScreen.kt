@@ -375,15 +375,13 @@ private fun DeviceRow(
     onClick: () -> Unit
 ) {
     val typeIcon = when (config.type) {
-        DeviceType.USB_SERIAL -> Icons.Default.Usb
+        DeviceType.USB_SLCAN -> Icons.Default.Usb
         DeviceType.SIMULATOR -> Icons.Default.DirectionsCar
-        DeviceType.PEAK_CAN -> Icons.Default.Router
     }
 
     val typeName = when (config.type) {
-        DeviceType.USB_SERIAL -> "USB Serial"
+        DeviceType.USB_SLCAN -> "USB SLCAN"
         DeviceType.SIMULATOR -> "Simulator"
-        DeviceType.PEAK_CAN -> "PEAK CAN"
     }
 
     val statusColor = when (connectionState) {
@@ -495,7 +493,7 @@ private fun BusDetailsCard(
             val allInfo = buildMap {
                 putAll(statusInfo)
                 when (config) {
-                    is UsbSerialConfig -> {
+                    is UsbSlcanConfig -> {
                         put("CAN-Bitrate", "${config.canBitrate / 1000} kbit/s")
                         put("Serielle Baudrate", "${config.baudRate}")
                         if (config.vendorId != null) {
@@ -503,10 +501,6 @@ private fun BusDetailsCard(
                         } else {
                             put("Modus", "Auto-Detect")
                         }
-                    }
-                    is PeakCanConfig -> {
-                        put("Kanal", "${config.channel}")
-                        put("Bitrate", "${config.bitrate / 1000} kbit/s")
                     }
                     is SimulatorConfig -> {
                         put("Modus", "Simulation")
@@ -598,20 +592,15 @@ private fun AddDeviceDialog(
                     // Type Selection
                     DeviceType.entries.forEach { type ->
                         val (icon, name, description) = when (type) {
-                            DeviceType.USB_SERIAL -> Triple(
+                            DeviceType.USB_SLCAN -> Triple(
                                 Icons.Default.Usb,
-                                "USB Serial",
-                                "USB-to-Serial CAN Adapter (z.B. Feather M4 CAN)"
+                                "USB SLCAN",
+                                "USB SLCAN Adapter (LAWICEL Protokoll)"
                             )
                             DeviceType.SIMULATOR -> Triple(
                                 Icons.Default.DirectionsCar,
                                 "Simulator",
                                 "Simulierte Fahrzeugdaten für Tests"
-                            )
-                            DeviceType.PEAK_CAN -> Triple(
-                                Icons.Default.Router,
-                                "PEAK CAN",
-                                "PEAK PCAN-USB Adapter"
                             )
                         }
 
@@ -628,7 +617,7 @@ private fun AddDeviceDialog(
                 } else {
                     // Type-specific config
                     when (selectedType) {
-                        DeviceType.USB_SERIAL -> UsbSerialConfigForm(
+                        DeviceType.USB_SLCAN -> UsbSlcanConfigForm(
                             onSave = { onAdd(it) },
                             onBack = { selectedType = null }
                         )
@@ -638,10 +627,6 @@ private fun AddDeviceDialog(
                                 onAdd(SimulatorConfig())
                             }
                         }
-                        DeviceType.PEAK_CAN -> PeakCanConfigForm(
-                            onSave = { onAdd(it) },
-                            onBack = { selectedType = null }
-                        )
                         null -> {}
                     }
                 }
@@ -680,14 +665,14 @@ private fun scanUsbDevices(context: Context): List<UsbDeviceInfo> {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun UsbSerialConfigForm(
-    initialConfig: UsbSerialConfig? = null,
-    onSave: (UsbSerialConfig) -> Unit,
+private fun UsbSlcanConfigForm(
+    initialConfig: UsbSlcanConfig? = null,
+    onSave: (UsbSlcanConfig) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
 
-    var name by remember { mutableStateOf(initialConfig?.name ?: "USB Serial") }
+    var name by remember { mutableStateOf(initialConfig?.name ?: "USB SLCAN") }
     var canBitrate by remember { mutableStateOf(initialConfig?.canBitrate ?: 500000) }
     var baudRate by remember { mutableStateOf(initialConfig?.baudRate ?: 2000000) }
     var autoDetect by remember { mutableStateOf(initialConfig?.vendorId == null) }
@@ -939,7 +924,7 @@ private fun UsbSerialConfigForm(
             }
             Button(
                 onClick = {
-                    val config = UsbSerialConfig(
+                    val config = UsbSlcanConfig(
                         id = initialConfig?.id ?: DeviceConfig.generateId(),
                         name = name,
                         canBitrate = canBitrate,
@@ -950,196 +935,6 @@ private fun UsbSerialConfigForm(
                     onSave(config)
                 },
                 enabled = name.isNotBlank() && (autoDetect || selectedVendorId != null)
-            ) {
-                Text("Speichern")
-            }
-        }
-    }
-}
-
-// Helper function to scan for PEAK CAN devices
-private fun scanPeakCanDevices(context: Context): List<UsbDeviceInfo> {
-    val usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
-    return usbManager.deviceList.values
-        .filter { device -> device.vendorId == PeakCanConfig.PEAK_VENDOR_ID }
-        .map { device ->
-            UsbDeviceInfo(
-                name = device.productName ?: "PEAK CAN Device",
-                vendorId = device.vendorId,
-                productId = device.productId
-            )
-        }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PeakCanConfigForm(
-    initialConfig: PeakCanConfig? = null,
-    onSave: (PeakCanConfig) -> Unit,
-    onBack: () -> Unit
-) {
-    val context = LocalContext.current
-
-    var name by remember { mutableStateOf(initialConfig?.name ?: "PEAK CAN") }
-    var channel by remember { mutableStateOf(initialConfig?.channel?.toString() ?: "1") }
-    var bitrate by remember { mutableStateOf(initialConfig?.bitrate ?: 500000) }
-    var bitrateExpanded by remember { mutableStateOf(false) }
-
-    // PEAK CAN device detection
-    var detectedDevices by remember { mutableStateOf<List<UsbDeviceInfo>>(emptyList()) }
-
-    // Scan for PEAK CAN devices on start
-    LaunchedEffect(Unit) {
-        detectedDevices = scanPeakCanDevices(context)
-    }
-
-    // Standard CAN bus bitrates
-    val standardBitrates = listOf(
-        10000 to "10 kbit/s",
-        20000 to "20 kbit/s",
-        50000 to "50 kbit/s",
-        100000 to "100 kbit/s",
-        125000 to "125 kbit/s",
-        250000 to "250 kbit/s",
-        500000 to "500 kbit/s",
-        800000 to "800 kbit/s",
-        1000000 to "1 Mbit/s"
-    )
-
-    Column {
-        // Show detected PEAK CAN devices
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = if (detectedDevices.isNotEmpty())
-                    Color(0xFF4CAF50).copy(alpha = 0.1f)
-                else
-                    MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-            )
-        ) {
-            Row(
-                modifier = Modifier.padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    if (detectedDevices.isNotEmpty()) Icons.Default.CheckCircle else Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = if (detectedDevices.isNotEmpty()) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    if (detectedDevices.isNotEmpty()) {
-                        detectedDevices.forEach { device ->
-                            Text(
-                                device.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "VID:%04X PID:%04X".format(device.vendorId, device.productId),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else {
-                        Text(
-                            "Kein PEAK CAN Gerät erkannt",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Text(
-                            "Schließe einen PCAN-USB Adapter an",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                IconButton(
-                    onClick = { detectedDevices = scanPeakCanDevices(context) },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = "Aktualisieren",
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = name,
-            onValueChange = { name = it },
-            label = { Text("Name") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = channel,
-            onValueChange = { channel = it.filter { c -> c.isDigit() } },
-            label = { Text("Kanal") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(Modifier.height(8.dp))
-
-        // Bitrate Dropdown
-        ExposedDropdownMenuBox(
-            expanded = bitrateExpanded,
-            onExpandedChange = { bitrateExpanded = it }
-        ) {
-            OutlinedTextField(
-                value = standardBitrates.find { it.first == bitrate }?.second ?: "${bitrate / 1000} kbit/s",
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Bitrate") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bitrateExpanded) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .menuAnchor()
-            )
-            ExposedDropdownMenu(
-                expanded = bitrateExpanded,
-                onDismissRequest = { bitrateExpanded = false }
-            ) {
-                standardBitrates.forEach { (value, label) ->
-                    DropdownMenuItem(
-                        text = { Text(label) },
-                        onClick = {
-                            bitrate = value
-                            bitrateExpanded = false
-                        },
-                        contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            TextButton(onClick = onBack) {
-                Text("Zurück")
-            }
-            Button(
-                onClick = {
-                    val config = PeakCanConfig(
-                        id = initialConfig?.id ?: DeviceConfig.generateId(),
-                        name = name,
-                        channel = channel.toIntOrNull() ?: 1,
-                        bitrate = bitrate
-                    )
-                    onSave(config)
-                },
-                enabled = name.isNotBlank()
             ) {
                 Text("Speichern")
             }
@@ -1158,12 +953,7 @@ private fun EditDeviceDialog(
         title = { Text("Gerät bearbeiten") },
         text = {
             when (config) {
-                is UsbSerialConfig -> UsbSerialConfigForm(
-                    initialConfig = config,
-                    onSave = onSave,
-                    onBack = onDismiss
-                )
-                is PeakCanConfig -> PeakCanConfigForm(
+                is UsbSlcanConfig -> UsbSlcanConfigForm(
                     initialConfig = config,
                     onSave = onSave,
                     onBack = onDismiss

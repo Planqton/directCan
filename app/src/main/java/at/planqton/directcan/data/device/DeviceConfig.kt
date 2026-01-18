@@ -20,13 +20,13 @@ sealed class DeviceConfig {
 }
 
 /**
- * Configuration for USB Serial CAN adapters
+ * Configuration for USB SLCAN adapters (LAWICEL protocol)
  */
 @Serializable
-@SerialName("usb_serial")
-data class UsbSerialConfig(
+@SerialName("usb_slcan")
+data class UsbSlcanConfig(
     override val id: String = DeviceConfig.generateId(),
-    override val name: String = "USB Serial",
+    override val name: String = "USB SLCAN",
     val vendorId: Int? = null,       // null = auto-detect any USB device
     val productId: Int? = null,      // null = auto-detect
     val baudRate: Int = 2000000,     // Serial baudrate (USB communication speed)
@@ -35,32 +35,32 @@ data class UsbSerialConfig(
     val stopBits: Int = 1,
     val parity: Int = 0              // 0 = none, 1 = odd, 2 = even
 ) : DeviceConfig() {
-    override val type: DeviceType = DeviceType.USB_SERIAL
+    override val type: DeviceType = DeviceType.USB_SLCAN
 
     companion object {
-        // Standard CAN bus bitrates
-        const val CAN_BITRATE_10K = 10000
-        const val CAN_BITRATE_20K = 20000
-        const val CAN_BITRATE_50K = 50000
-        const val CAN_BITRATE_100K = 100000
-        const val CAN_BITRATE_125K = 125000
-        const val CAN_BITRATE_250K = 250000
-        const val CAN_BITRATE_500K = 500000
-        const val CAN_BITRATE_800K = 800000
-        const val CAN_BITRATE_1M = 1000000
+        // Standard CAN bus bitrates (SLCAN S0-S8)
+        const val CAN_BITRATE_10K = 10000    // S0
+        const val CAN_BITRATE_20K = 20000    // S1
+        const val CAN_BITRATE_50K = 50000    // S2
+        const val CAN_BITRATE_100K = 100000  // S3
+        const val CAN_BITRATE_125K = 125000  // S4
+        const val CAN_BITRATE_250K = 250000  // S5
+        const val CAN_BITRATE_500K = 500000  // S6
+        const val CAN_BITRATE_800K = 800000  // S7
+        const val CAN_BITRATE_1M = 1000000   // S8
 
         /** Create config for a specific USB device */
-        fun forDevice(name: String, vendorId: Int, productId: Int): UsbSerialConfig {
-            return UsbSerialConfig(
+        fun forDevice(name: String, vendorId: Int, productId: Int): UsbSlcanConfig {
+            return UsbSlcanConfig(
                 name = name,
                 vendorId = vendorId,
                 productId = productId
             )
         }
 
-        /** Create config that auto-detects any USB serial device */
-        fun autoDetect(name: String = "USB Serial (Auto)"): UsbSerialConfig {
-            return UsbSerialConfig(name = name)
+        /** Create config that auto-detects any USB SLCAN device */
+        fun autoDetect(name: String = "USB SLCAN (Auto)"): UsbSlcanConfig {
+            return UsbSlcanConfig(name = name)
         }
     }
 }
@@ -82,34 +82,6 @@ data class SimulatorConfig(
             id = "simulator_default",
             name = "Fahrzeug-Simulator"
         )
-    }
-}
-
-/**
- * Configuration for PEAK CAN adapters (PCAN-USB)
- */
-@Serializable
-@SerialName("peak_can")
-data class PeakCanConfig(
-    override val id: String = DeviceConfig.generateId(),
-    override val name: String = "PEAK CAN",
-    val channel: Int = 1,            // PCAN channel (1-8 for multi-channel adapters)
-    val bitrate: Int = 500000,       // CAN bitrate in bit/s
-    val listenOnly: Boolean = false  // Listen-only mode (no ACK)
-) : DeviceConfig() {
-    override val type: DeviceType = DeviceType.PEAK_CAN
-
-    companion object {
-        // Common CAN bitrates
-        const val BITRATE_125K = 125000
-        const val BITRATE_250K = 250000
-        const val BITRATE_500K = 500000
-        const val BITRATE_1M = 1000000
-
-        // PEAK USB Vendor/Product IDs
-        const val PEAK_VENDOR_ID = 0x0C72
-        const val PCAN_USB_PRODUCT_ID = 0x000C
-        const val PCAN_USB_PRO_PRODUCT_ID = 0x0014
     }
 }
 

@@ -7,9 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
  * Supported device types for CAN communication
  */
 enum class DeviceType {
-    USB_SERIAL,
-    SIMULATOR,
-    PEAK_CAN
+    USB_SLCAN,
+    SIMULATOR
 }
 
 /**
@@ -24,7 +23,7 @@ enum class ConnectionState {
 
 /**
  * Common interface for all CAN device types.
- * Implementations: UsbSerialDevice, SimulatorDevice, PeakCanDevice
+ * Implementations: UsbSlcanDevice, SimulatorDevice
  */
 interface CanDevice {
     /** Unique identifier for this device instance */
@@ -82,10 +81,17 @@ interface CanDevice {
      * @return true if sent successfully
      */
     suspend fun sendCanFrame(id: Long, data: ByteArray, extended: Boolean = false): Boolean {
-        val idHex = id.toString(16).uppercase()
-        val extMarker = if (extended) "X" else ""
-        val dataHex = data.joinToString(" ") { "%02X".format(it) }
-        return send("s${idHex}${extMarker} ${data.size} $dataHex\n")
+        // SLCAN format: t<id:3><len:1><data> or T<id:8><len:1><data>
+        val command = if (extended) {
+            val idHex = id.toString(16).uppercase().padStart(8, '0')
+            val dataHex = data.joinToString("") { "%02X".format(it) }
+            "T$idHex${data.size}$dataHex\r"
+        } else {
+            val idHex = id.toString(16).uppercase().padStart(3, '0')
+            val dataHex = data.joinToString("") { "%02X".format(it) }
+            "t$idHex${data.size}$dataHex\r"
+        }
+        return send(command)
     }
 
     /**

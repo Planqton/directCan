@@ -16,15 +16,15 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.io.IOException
 
-private const val TAG = "UsbSerialDevice"
+private const val TAG = "UsbSlcanDevice"
 
 /**
- * USB Serial CAN device implementation.
- * Supports any USB-to-serial adapter with compatible firmware.
+ * USB SLCAN device implementation.
+ * Supports any USB-to-serial adapter with SLCAN/LAWICEL protocol firmware.
  */
-class UsbSerialDevice(
+class UsbSlcanDevice(
     private val context: Context,
-    private val config: UsbSerialConfig
+    private val config: UsbSlcanConfig
 ) : CanDevice {
 
     companion object {
@@ -35,7 +35,7 @@ class UsbSerialDevice(
     }
 
     override val id: String = config.id
-    override val type: DeviceType = DeviceType.USB_SERIAL
+    override val type: DeviceType = DeviceType.USB_SLCAN
     override val displayName: String = config.name
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -221,9 +221,13 @@ class UsbSerialDevice(
             startReading()
             _connectionState.value = ConnectionState.CONNECTED
 
-            // Request firmware info
-            send("i\n")
-            Log.i(TAG, "USB device connected successfully")
+            // SLCAN: Set bitrate and open CAN
+            send("S6\r")  // 500k (default)
+            delay(50)
+            send("O\r")   // Open CAN
+            delay(50)
+            send("V\r")   // Request firmware version
+            Log.i(TAG, "USB device connected successfully (SLCAN)")
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -288,13 +292,29 @@ class UsbSerialDevice(
     override suspend fun disconnect() {
         Log.i(TAG, "Disconnecting")
         try {
-            ioManager?.stop()
+            // SLCAN: Close CAN before disconnecting
+            try {
+                serialPort?.write("C\r".toByteArray(), 100)
+                delay(50)  // Give firmware time to process
+                Log.d(TAG, "Sent SLCAN close command")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to send SLCAN close command", e)
+            }
+
+            // Stop IO manager and wait for it to fully stop
+            ioManager?.let { manager ->
+                manager.stop()
+                delay(100)  // Give ioManager time to fully stop
+            }
             ioManager = null
+
+            // Close serial port
             serialPort?.close()
             serialPort = null
             targetDevice = null
             synchronized(bufferLock) { lineBuffer.clear() }
             _connectionState.value = ConnectionState.DISCONNECTED
+            Log.i(TAG, "Disconnected successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error during disconnect", e)
         }
@@ -326,7 +346,7 @@ class UsbSerialDevice(
 
     override fun getStatusInfo(): Map<String, String> {
         val info = mutableMapOf<String, String>()
-        info["Typ"] = "USB Serial"
+        info["Typ"] = "USB SLCAN"
         info["Baudrate"] = "${config.baudRate}"
 
         targetDevice?.let { device ->
@@ -339,8 +359,40 @@ class UsbSerialDevice(
 
     override suspend fun setCanBitrate(bitrate: Int): Boolean {
         Log.d(TAG, "Setting CAN bitrate to: $bitrate")
-        // Send SLCAN-style baudrate command: "b<bitrate>\n"
-        return send("b$bitrate\n")
+        // SLCAN bitrate codes S0-S8
+        val code = when (bitrate) {
+            10000 -> "S0"
+            20000 -> "S1"
+            50000 -> "S2"
+            100000 -> "S3"
+            125000 -> "S4"
+            250000 -> "S5"
+            500000 -> "S6"
+            800000 -> "S7"
+            1000000 -> "S8"
+            else -> {
+                Log.w(TAG, "Unsupported bitrate: $bitrate, using 500k")
+                "S6"
+            }
+        }
+        return send("$code\r")
+    }
+
+    override suspend fun sendCanFrame(id: Long, data: ByteArray, extended: Boolean): Boolean {
+        // SLCAN format: t<id:3><len:1><data> or T<id:8><len:1><data>
+        val command = if (extended) {
+            // Extended frame: T + 8 hex chars ID + length + data
+            val idHex = id.toString(16).uppercase().padStart(8, '0')
+            val dataHex = data.joinToString("") { "%02X".format(it) }
+            "T$idHex${data.size}$dataHex\r"
+        } else {
+            // Standard frame: t + 3 hex chars ID + length + data
+            val idHex = id.toString(16).uppercase().padStart(3, '0')
+            val dataHex = data.joinToString("") { "%02X".format(it) }
+            "t$idHex${data.size}$dataHex\r"
+        }
+        Log.d(TAG, "Sending SLCAN frame: $command")
+        return send(command)
     }
 
     override fun dispose() {

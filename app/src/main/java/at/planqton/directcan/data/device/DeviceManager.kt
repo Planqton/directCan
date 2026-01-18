@@ -60,9 +60,8 @@ class DeviceManager(private val context: Context) {
         classDiscriminator = "_class"  // Avoid conflict with 'type' property
         serializersModule = SerializersModule {
             polymorphic(DeviceConfig::class) {
-                subclass(UsbSerialConfig::class)
+                subclass(UsbSlcanConfig::class)
                 subclass(SimulatorConfig::class)
-                subclass(PeakCanConfig::class)
             }
         }
     }
@@ -83,20 +82,44 @@ class DeviceManager(private val context: Context) {
         scope, SharingStarted.Eagerly, emptyList()
     )
 
-    // Currently connected device
-    private val _activeDevice = MutableStateFlow<CanDevice?>(null)
-    val activeDevice: StateFlow<CanDevice?> = _activeDevice.asStateFlow()
+    // Currently connected devices (port -> device), max 2 ports
+    private val _activeDevices = MutableStateFlow<Map<Int, CanDevice>>(emptyMap())
+    val activeDevices: StateFlow<Map<Int, CanDevice>> = _activeDevices.asStateFlow()
 
-    // Connection state (mirrors active device state)
-    val connectionState: StateFlow<ConnectionState> = _activeDevice.flatMapLatest { device ->
-        device?.connectionState ?: flowOf(ConnectionState.DISCONNECTED)
+    // Number of connected devices
+    val connectedDeviceCount: StateFlow<Int> = _activeDevices.map { it.size }
+        .stateIn(scope, SharingStarted.Eagerly, 0)
+
+    // Legacy single-device access (returns first connected device)
+    val activeDevice: StateFlow<CanDevice?> = _activeDevices.map { devices ->
+        devices.values.firstOrNull()
+    }.stateIn(scope, SharingStarted.Eagerly, null)
+
+    // Connection state (CONNECTED if at least one device is in activeDevices and connected)
+    val connectionState: StateFlow<ConnectionState> = _activeDevices.map { devices ->
+        if (devices.isEmpty()) {
+            ConnectionState.DISCONNECTED
+        } else {
+            // Check device states directly
+            val states = devices.values.map { it.connectionState.value }
+            when {
+                states.any { it == ConnectionState.CONNECTED } -> ConnectionState.CONNECTED
+                states.any { it == ConnectionState.CONNECTING } -> ConnectionState.CONNECTING
+                states.any { it == ConnectionState.ERROR } -> ConnectionState.ERROR
+                else -> ConnectionState.DISCONNECTED
+            }
+        }
     }.stateIn(scope, SharingStarted.Eagerly, ConnectionState.DISCONNECTED)
 
-    // Unified data stream from active device
+    // Unified data stream from all active devices (legacy, without port info)
     private val _receivedLines = MutableSharedFlow<String>(extraBufferCapacity = 1000)
     val receivedLines: SharedFlow<String> = _receivedLines.asSharedFlow()
 
-    // Error stream from active device
+    // Data stream with port info: Pair(port, line)
+    private val _receivedLinesWithPort = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 1000)
+    val receivedLinesWithPort: SharedFlow<Pair<Int, String>> = _receivedLinesWithPort.asSharedFlow()
+
+    // Error stream from all active devices
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 100)
     val errors: SharedFlow<String> = _errors.asSharedFlow()
 
@@ -107,6 +130,33 @@ class DeviceManager(private val context: Context) {
     // USB Manager for device detection
     private val usbManager: UsbManager by lazy {
         context.getSystemService(Context.USB_SERVICE) as UsbManager
+    }
+
+    /**
+     * Get the next available port number (1 or 2).
+     * Returns null if both ports are occupied.
+     */
+    private fun getNextAvailablePort(): Int? {
+        val usedPorts = _activeDevices.value.keys
+        return when {
+            1 !in usedPorts -> 1
+            2 !in usedPorts -> 2
+            else -> null  // Both ports occupied
+        }
+    }
+
+    /**
+     * Get the port number for a connected device
+     */
+    fun getPortForDevice(deviceId: String): Int? {
+        return _activeDevices.value.entries.find { it.value.id == deviceId }?.key
+    }
+
+    /**
+     * Get the device connected to a specific port
+     */
+    fun getDeviceOnPort(port: Int): CanDevice? {
+        return _activeDevices.value[port]
     }
 
     init {
@@ -179,9 +229,8 @@ class DeviceManager(private val context: Context) {
      */
     private fun createDeviceFromConfig(config: DeviceConfig): CanDevice? {
         val device = when (config) {
-            is UsbSerialConfig -> UsbSerialDevice(context, config)
+            is UsbSlcanConfig -> UsbSlcanDevice(context, config)
             is SimulatorConfig -> SimulatorDevice(config)
-            is PeakCanConfig -> PeakCanDevice(context, config)
         }
 
         _devices.value = _devices.value + (config.id to device)
@@ -189,14 +238,21 @@ class DeviceManager(private val context: Context) {
         // Subscribe to device data streams
         scope.launch {
             device.receivedLines.collect { line ->
-                if (_activeDevice.value?.id == device.id) {
-                    _receivedLines.emit(line)
-                }
+                // Check if this device is connected on any port
+                val port = getPortForDevice(device.id)
+                Log.i(TAG, "RX from ${device.id}: port=$port, activeDevices=${_activeDevices.value.keys}, line=${line.take(40)}")
+
+                // Always emit data if we have any port (fallback to port 1)
+                val effectivePort = port ?: 1
+                _receivedLinesWithPort.emit(effectivePort to line)
+                _receivedLines.emit(line)
             }
         }
         scope.launch {
             device.errors.collect { error ->
-                if (_activeDevice.value?.id == device.id) {
+                // Check if this device is connected on any port
+                val port = getPortForDevice(device.id)
+                if (port != null) {
                     _errors.emit(error)
                 }
             }
@@ -219,9 +275,10 @@ class DeviceManager(private val context: Context) {
      * Update an existing device configuration
      */
     suspend fun updateDevice(config: DeviceConfig) {
-        // Disconnect if this device is active
-        if (_activeDevice.value?.id == config.id) {
-            disconnect()
+        // Disconnect if this device is active on any port
+        val port = getPortForDevice(config.id)
+        if (port != null) {
+            disconnectPort(port)
         }
 
         // Remove old device instance
@@ -240,12 +297,37 @@ class DeviceManager(private val context: Context) {
     }
 
     /**
+     * Update the CAN bitrate for a specific device configuration.
+     * This only updates the config; the actual bitrate is applied when connecting.
+     */
+    suspend fun updateDeviceBitrate(deviceId: String, bitrate: Int) {
+        val config = _deviceConfigs.value.find { it.id == deviceId } ?: return
+
+        if (config is UsbSlcanConfig) {
+            val updatedConfig = config.copy(canBitrate = bitrate)
+            _deviceConfigs.value = _deviceConfigs.value.map {
+                if (it.id == deviceId) updatedConfig else it
+            }
+
+            // Also update the device instance so changes are reflected immediately
+            _devices.value[deviceId]?.let { device ->
+                _devices.value = _devices.value - deviceId
+                createDeviceFromConfig(updatedConfig)
+            }
+
+            saveDeviceConfigs()
+            Log.d(TAG, "Updated bitrate for ${config.name}: $bitrate")
+        }
+    }
+
+    /**
      * Remove a device configuration
      */
     suspend fun removeDevice(deviceId: String) {
-        // Disconnect if this device is active
-        if (_activeDevice.value?.id == deviceId) {
-            disconnect()
+        // Disconnect if this device is active on any port
+        val port = getPortForDevice(deviceId)
+        if (port != null) {
+            disconnectPort(port)
         }
 
         // Remove device instance
@@ -259,55 +341,121 @@ class DeviceManager(private val context: Context) {
     }
 
     /**
-     * Connect to a device by ID
+     * Connect to a device by ID.
+     * Returns the assigned port number (1 or 2) on success.
      */
-    suspend fun connect(deviceId: String): Result<Unit> {
+    suspend fun connect(deviceId: String): Result<Int> {
         val device = _devices.value[deviceId]
             ?: return Result.failure(IllegalArgumentException("Device not found: $deviceId"))
 
-        // Disconnect current device first
-        disconnect()
+        // Check if device is already connected
+        val existingPort = getPortForDevice(deviceId)
+        if (existingPort != null) {
+            Log.w(TAG, "Device already connected on port $existingPort: ${device.displayName}")
+            return Result.success(existingPort)
+        }
 
-        Log.i(TAG, "Connecting to device: ${device.displayName}")
+        // Get next available port
+        val port = getNextAvailablePort()
+            ?: return Result.failure(IllegalStateException("Maximal 2 Geräte können gleichzeitig verbunden sein"))
+
+        Log.i(TAG, "Connecting to device: ${device.displayName} on port $port")
         val result = device.connect()
 
         if (result.isSuccess) {
-            _activeDevice.value = device
+            // Set the CAN bitrate from the device config
+            val config = getDeviceConfig(deviceId)
+            if (config is UsbSlcanConfig) {
+                Log.d(TAG, "Setting CAN bitrate for ${device.displayName}: ${config.canBitrate}")
+                device.setCanBitrate(config.canBitrate)
+            }
+
+            _activeDevices.value = _activeDevices.value + (port to device)
             // Save as last connected device
             context.deviceDataStore.edit { prefs ->
                 prefs[Keys.LAST_CONNECTED_DEVICE] = deviceId
             }
-            Log.i(TAG, "Connected to: ${device.displayName}")
+            Log.i(TAG, "Connected to: ${device.displayName} on port $port")
+            return Result.success(port)
         } else {
             Log.e(TAG, "Connection failed: ${result.exceptionOrNull()?.message}")
+            return Result.failure(result.exceptionOrNull() ?: Exception("Connection failed"))
         }
-
-        return result
     }
 
     /**
-     * Disconnect from the current device
+     * Disconnect from all devices
      */
     suspend fun disconnect() {
-        _activeDevice.value?.let { device ->
-            Log.i(TAG, "Disconnecting from: ${device.displayName}")
+        _activeDevices.value.forEach { (port, device) ->
+            Log.i(TAG, "Disconnecting from: ${device.displayName} (port $port)")
             device.disconnect()
-            _activeDevice.value = null
+        }
+        _activeDevices.value = emptyMap()
+    }
+
+    /**
+     * Disconnect a specific port
+     */
+    suspend fun disconnectPort(port: Int) {
+        val device = _activeDevices.value[port] ?: return
+        Log.i(TAG, "Disconnecting port $port: ${device.displayName}")
+        device.disconnect()
+        _activeDevices.value = _activeDevices.value - port
+    }
+
+    /**
+     * Disconnect a specific device by ID
+     */
+    suspend fun disconnectDevice(deviceId: String) {
+        val port = getPortForDevice(deviceId) ?: return
+        disconnectPort(port)
+    }
+
+    /**
+     * Send data through the first active device (legacy)
+     */
+    suspend fun send(data: String): Boolean {
+        return _activeDevices.value.values.firstOrNull()?.send(data) ?: false
+    }
+
+    /**
+     * Send data through a specific port
+     */
+    suspend fun sendToPort(port: Int, data: String): Boolean {
+        return _activeDevices.value[port]?.send(data) ?: false
+    }
+
+    /**
+     * Send data through multiple ports
+     */
+    suspend fun sendToPorts(ports: Set<Int>, data: String): Map<Int, Boolean> {
+        return ports.associateWith { port ->
+            _activeDevices.value[port]?.send(data) ?: false
         }
     }
 
     /**
-     * Send data through the active device
+     * Send a CAN frame through the first active device (legacy)
      */
-    suspend fun send(data: String): Boolean {
-        return _activeDevice.value?.send(data) ?: false
+    suspend fun sendCanFrame(id: Long, data: ByteArray, extended: Boolean = false): Boolean {
+        return _activeDevices.value.values.firstOrNull()?.sendCanFrame(id, data, extended) ?: false
     }
 
     /**
-     * Send a CAN frame through the active device
+     * Send a CAN frame to a specific port
      */
-    suspend fun sendCanFrame(id: Long, data: ByteArray, extended: Boolean = false): Boolean {
-        return _activeDevice.value?.sendCanFrame(id, data, extended) ?: false
+    suspend fun sendCanFrameToPort(port: Int, id: Long, data: ByteArray, extended: Boolean = false): Boolean {
+        return _activeDevices.value[port]?.sendCanFrame(id, data, extended) ?: false
+    }
+
+    /**
+     * Send a CAN frame to multiple ports
+     */
+    suspend fun sendCanFrameToPorts(ports: Set<Int>, id: Long, data: ByteArray, extended: Boolean = false): Map<Int, Boolean> {
+        return ports.associateWith { port ->
+            _activeDevices.value[port]?.sendCanFrame(id, data, extended) ?: false
+        }
     }
 
     /**
@@ -344,7 +492,7 @@ class DeviceManager(private val context: Context) {
     }
 
     /**
-     * Set the CAN bus bitrate
+     * Set the CAN bus bitrate for all connected devices
      * @param bitrate Bitrate in bit/s
      */
     suspend fun setCanBitrate(bitrate: Int) {
@@ -360,10 +508,19 @@ class DeviceManager(private val context: Context) {
             Log.e(TAG, "Error saving CAN bitrate", e)
         }
 
-        // If connected, update the device bitrate
-        _activeDevice.value?.let { device ->
+        // Update bitrate on all connected devices
+        _activeDevices.value.forEach { (port, device) ->
+            Log.d(TAG, "Setting bitrate on port $port: ${device.displayName}")
             device.setCanBitrate(bitrate)
         }
+    }
+
+    /**
+     * Set the CAN bus bitrate for a specific port
+     */
+    suspend fun setCanBitrateForPort(port: Int, bitrate: Int): Boolean {
+        val device = _activeDevices.value[port] ?: return false
+        return device.setCanBitrate(bitrate)
     }
 
     /**
@@ -375,9 +532,10 @@ class DeviceManager(private val context: Context) {
         val device = _devices.value[deviceId]
             ?: return ConnectionTestResult(false, "Gerät nicht gefunden")
 
-        // Don't test if already connected
-        if (_activeDevice.value?.id == deviceId) {
-            return ConnectionTestResult(true, "Gerät ist bereits verbunden", device.getStatusInfo())
+        // Don't test if already connected on any port
+        val connectedPort = getPortForDevice(deviceId)
+        if (connectedPort != null) {
+            return ConnectionTestResult(true, "Gerät ist bereits verbunden (Port $connectedPort)", device.getStatusInfo())
         }
 
         return try {
