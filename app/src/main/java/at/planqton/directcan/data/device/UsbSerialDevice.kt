@@ -65,7 +65,7 @@ class UsbSlcanDevice(
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     // Data streams
-    private val _receivedLines = MutableSharedFlow<String>(extraBufferCapacity = 1000)
+    private val _receivedLines = MutableSharedFlow<String>(extraBufferCapacity = 5000)
     override val receivedLines: SharedFlow<String> = _receivedLines.asSharedFlow()
 
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 100)
@@ -198,13 +198,18 @@ class UsbSlcanDevice(
 
     private fun requestPermission(device: UsbDevice) {
         Log.d(TAG, "Requesting permission for device: ${device.productName}")
+        // On Android 14+ (UPSIDE_DOWN_CAKE / API 34), FLAG_MUTABLE with implicit intents is not allowed.
+        // We need to make the intent explicit by setting the package.
+        val intent = Intent(ACTION_USB_PERMISSION).apply {
+            setPackage(context.packageName)
+        }
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             PendingIntent.FLAG_MUTABLE
         } else {
             0
         }
         val permissionIntent = PendingIntent.getBroadcast(
-            context, 0, Intent(ACTION_USB_PERMISSION), flags
+            context, 0, intent, flags
         )
         usbManager.requestPermission(device, permissionIntent)
     }
@@ -236,6 +241,9 @@ class UsbSlcanDevice(
 
             startReading()
             _connectionState.value = ConnectionState.CONNECTED
+
+            // Small delay to let firmware initialize after connection
+            delay(100)
 
             // Detect firmware capabilities first
             detectCapabilities()
@@ -286,21 +294,31 @@ class UsbSlcanDevice(
                     }
                 }
 
-                // Emit outside of synchronized block
+                // Emit outside of synchronized block - use tryEmit to avoid coroutine pile-up
                 if (completedLines.isNotEmpty()) {
-                    scope.launch {
-                        completedLines.forEach { line ->
-                            _receivedLines.emit(line)
+                    completedLines.forEach { line ->
+                        if (!_receivedLines.tryEmit(line)) {
+                            Log.w(TAG, "Frame dropped - buffer full")
                         }
                     }
                 }
             }
 
             override fun onRunError(e: Exception) {
-                Log.e(TAG, "Serial read error", e)
+                Log.e(TAG, "Serial read error - connection lost", e)
                 scope.launch {
-                    _errors.emit("Read error: ${e.message}")
+                    _errors.emit("Verbindung verloren")
                     _connectionState.value = ConnectionState.ERROR
+                    // Clean up resources - don't call ioManager.stop() from inside callback
+                    try {
+                        serialPort?.close()
+                    } catch (ex: Exception) {
+                        Log.w(TAG, "Error closing serial port after error", ex)
+                    }
+                    serialPort = null
+                    ioManager = null
+                    targetDevice = null
+                    synchronized(bufferLock) { lineBuffer.clear() }
                 }
             }
         })
@@ -419,32 +437,41 @@ class UsbSlcanDevice(
     private suspend fun detectCapabilities() {
         Log.d(TAG, "Detecting firmware capabilities...")
 
-        // Send info command
-        send("I\r")
+        // Try up to 3 times with increasing delays
+        for (attempt in 1..3) {
+            // Send info command
+            send("I\r")
 
-        // Wait for JSON response
-        val response = withTimeoutOrNull(500L) {
-            receivedLines.first { it.startsWith("{") }
-        }
-
-        if (response != null) {
-            try {
-                val json = JSONObject(response)
-                _capabilities.value = FirmwareCapabilities(
-                    name = json.optString("fw", "Unknown"),
-                    version = json.optString("ver", "Unknown"),
-                    supportsIsoTp = json.optBoolean("isotp", false),
-                    supportsSlcan = json.optBoolean("slcan", true)
-                )
-                Log.i(TAG, "Firmware capabilities detected: ${_capabilities.value}")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to parse firmware capabilities JSON", e)
-                _capabilities.value = FirmwareCapabilities()
+            // Wait for JSON response
+            val response = withTimeoutOrNull(500L) {
+                receivedLines.first { it.startsWith("{") }
             }
-        } else {
-            Log.d(TAG, "No firmware capabilities response - standard SLCAN device")
-            _capabilities.value = FirmwareCapabilities()
+            Log.d(TAG, "Capabilities response (attempt $attempt): $response")
+
+            if (response != null) {
+                try {
+                    val json = JSONObject(response)
+                    _capabilities.value = FirmwareCapabilities(
+                        name = json.optString("fw", "Unknown"),
+                        version = json.optString("ver", "Unknown"),
+                        supportsIsoTp = json.optBoolean("isotp", false),
+                        supportsSlcan = json.optBoolean("slcan", true)
+                    )
+                    Log.i(TAG, "Firmware capabilities detected: ${_capabilities.value}")
+                    return
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to parse firmware capabilities JSON", e)
+                }
+            }
+
+            // Wait before retry
+            if (attempt < 3) {
+                delay(100L * attempt)
+            }
         }
+
+        Log.d(TAG, "No firmware capabilities response after 3 attempts - standard SLCAN device")
+        _capabilities.value = FirmwareCapabilities()
     }
 
     // ============== ISO-TP Functions ==============
@@ -481,13 +508,15 @@ class UsbSlcanDevice(
             "U$txHex$rxHex$lenHex$dataHex\r"
         }
 
-        Log.d(TAG, "Sending ISO-TP: $command")
+        Log.i(TAG, "Sending ISO-TP: $command")
         send(command)
 
         // Wait for response (u...) or error (uERR:...)
-        return withTimeoutOrNull(2000L) {
+        // Timeout increased to 5000ms for reliable multi-frame transfers
+        Log.d(TAG, "Waiting for ISO-TP response (rxId=0x${rxId.toString(16)})...")
+        return withTimeoutOrNull(5000L) {
             receivedLines.first { it.startsWith("u") || it.startsWith("w") }.let { response ->
-                Log.d(TAG, "ISO-TP response: $response")
+                Log.i(TAG, "ISO-TP response: $response")
                 if (response.startsWith("uERR:") || response.startsWith("wERR:")) {
                     val error = response.substringAfter(":")
                     Log.w(TAG, "ISO-TP error: $error")
@@ -508,46 +537,162 @@ class UsbSlcanDevice(
     // ============== OBD2 Convenience Methods ==============
 
     /**
-     * Read Diagnostic Trouble Codes (DTCs)
-     * OBD2 Service 0x03
+     * OBD2 ECU Response IDs (0x7E8 - 0x7EF)
+     * Each ECU responds on its own ID when broadcast request is sent to 0x7DF
+     */
+    private val OBD2_RESPONSE_IDS = listOf(
+        0x7E8L,  // ECM - Engine Control Module
+        0x7E9L,  // TCM - Transmission Control Module
+        0x7EAL,  // ABS - Anti-lock Braking System
+        0x7EBL,  // RCM - Restraint Control Module (Airbag)
+        0x7ECL,  // BCM - Body Control Module
+        0x7EDL,  // Additional ECU
+        0x7EEL,  // Additional ECU
+        0x7EFL   // Additional ECU
+    )
+
+    /**
+     * Send OBD2 request to all ECUs and collect responses.
+     * Sends broadcast to 0x7DF and collects responses from 0x7E8-0x7EF.
+     *
+     * @param serviceData OBD2 service bytes (e.g., byteArrayOf(0x03) for read DTCs)
+     * @param expectedResponse Expected positive response byte (service + 0x40)
+     * @return Map of ECU ID to response data
+     */
+    private suspend fun sendObd2Broadcast(
+        serviceData: ByteArray,
+        expectedResponse: Byte
+    ): Map<Long, ByteArray> {
+        if (!_capabilities.value.supportsIsoTp) {
+            throw UnsupportedOperationException("Firmware unterstützt kein ISO-TP")
+        }
+
+        val responses = mutableMapOf<Long, ByteArray>()
+
+        // Use BROADCAST (0x7DF) - all ECUs will respond on their respective IDs
+        // We query each expected response ID separately since firmware only supports one rxId per request
+        for (ecuRxId in OBD2_RESPONSE_IDS) {
+            try {
+                // Always send to BROADCAST address 0x7DF, expect response on ecuRxId
+                val response = sendIsoTp(0x7DF, ecuRxId, serviceData)
+                if (response != null && response.isNotEmpty()) {
+                    // Check for positive response
+                    if (response[0] == expectedResponse) {
+                        responses[ecuRxId] = response
+                        Log.d(TAG, "ECU 0x${ecuRxId.toString(16).uppercase()}: ${response.joinToString(" ") { "%02X".format(it) }}")
+                    } else if (response[0] == 0x7F.toByte()) {
+                        // Negative response - ECU exists but service not supported or no data
+                        Log.d(TAG, "ECU 0x${ecuRxId.toString(16).uppercase()}: Negative response")
+                    }
+                }
+            } catch (e: Exception) {
+                // ECU doesn't respond - that's normal, not all ECUs are present
+                Log.v(TAG, "ECU 0x${ecuRxId.toString(16).uppercase()}: No response")
+            }
+        }
+
+        return responses
+    }
+
+    /**
+     * Read Diagnostic Trouble Codes (DTCs) from ALL ECUs
+     * OBD2 Service 0x03 (Stored DTCs)
+     *
+     * @return List of DTC objects containing code, ECU source, and status
      */
     suspend fun readDtcs(): Result<List<String>> {
-        return try {
-            // Send OBD2 request: Service 03 (Read DTCs)
-            val response = sendIsoTp(0x7DF, 0x7E8, byteArrayOf(0x03))
-                ?: return Result.failure(Exception("Keine Antwort vom Steuergerät"))
+        return readDtcsWithService(0x03, 0x43.toByte(), "Stored")
+    }
 
-            if (response.isEmpty()) {
+    /**
+     * Read Pending Diagnostic Trouble Codes from ALL ECUs
+     * OBD2 Service 0x07 (Pending DTCs - not yet confirmed)
+     */
+    suspend fun readPendingDtcs(): Result<List<String>> {
+        return readDtcsWithService(0x07, 0x47.toByte(), "Pending")
+    }
+
+    /**
+     * Read Permanent Diagnostic Trouble Codes from ALL ECUs
+     * OBD2 Service 0x0A (Permanent DTCs - cannot be cleared by scan tool)
+     */
+    suspend fun readPermanentDtcs(): Result<List<String>> {
+        return readDtcsWithService(0x0A, 0x4A.toByte(), "Permanent")
+    }
+
+    private suspend fun readDtcsWithService(
+        service: Int,
+        expectedResponse: Byte,
+        dtcType: String
+    ): Result<List<String>> {
+        return try {
+            Log.i(TAG, "Reading $dtcType DTCs (Service 0x${service.toString(16).uppercase()}) from all ECUs...")
+
+            val responses = sendObd2Broadcast(byteArrayOf(service.toByte()), expectedResponse)
+
+            if (responses.isEmpty()) {
+                Log.i(TAG, "No ECUs responded to DTC request")
                 return Result.success(emptyList())
             }
 
-            // Check for positive response (0x43 = 0x03 + 0x40)
-            if (response.isNotEmpty() && response[0] == 0x43.toByte()) {
+            val allDtcs = mutableListOf<String>()
+
+            for ((ecuId, response) in responses) {
+                val ecuName = getEcuName(ecuId)
                 val dtcs = parseDtcResponse(response)
-                Log.i(TAG, "Read ${dtcs.size} DTCs: $dtcs")
-                Result.success(dtcs)
-            } else {
-                Result.failure(Exception("Ungültige Antwort: ${response.joinToString(" ") { "%02X".format(it) }}"))
+                Log.i(TAG, "$ecuName (0x${ecuId.toString(16).uppercase()}): ${dtcs.size} $dtcType DTCs: $dtcs")
+                allDtcs.addAll(dtcs)
             }
+
+            // Remove duplicates (same DTC might be reported by multiple ECUs)
+            val uniqueDtcs = allDtcs.distinct()
+            Log.i(TAG, "Total unique $dtcType DTCs: ${uniqueDtcs.size}")
+            Result.success(uniqueDtcs)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to read DTCs", e)
+            Log.e(TAG, "Failed to read $dtcType DTCs", e)
             Result.failure(e)
         }
     }
 
     /**
-     * Clear Diagnostic Trouble Codes (DTCs)
+     * Get human-readable ECU name from response ID
+     */
+    private fun getEcuName(ecuId: Long): String {
+        return when (ecuId) {
+            0x7E8L -> "Motor (ECM)"
+            0x7E9L -> "Getriebe (TCM)"
+            0x7EAL -> "ABS/ESP"
+            0x7EBL -> "Airbag (RCM)"
+            0x7ECL -> "Karosserie (BCM)"
+            0x7EDL -> "ECU-5"
+            0x7EEL -> "ECU-6"
+            0x7EFL -> "ECU-7"
+            else -> "ECU-0x${ecuId.toString(16).uppercase()}"
+        }
+    }
+
+    /**
+     * Clear Diagnostic Trouble Codes (DTCs) on ALL ECUs
      * OBD2 Service 0x04
      */
     suspend fun clearDtcs(): Result<Boolean> {
         return try {
-            val response = sendIsoTp(0x7DF, 0x7E8, byteArrayOf(0x04))
-                ?: return Result.failure(Exception("Keine Antwort vom Steuergerät"))
+            Log.i(TAG, "Clearing DTCs on all ECUs...")
 
-            // Check for positive response (0x44 = 0x04 + 0x40)
-            val success = response.isNotEmpty() && response[0] == 0x44.toByte()
-            Log.i(TAG, "Clear DTCs: ${if (success) "Success" else "Failed"}")
-            Result.success(success)
+            val responses = sendObd2Broadcast(byteArrayOf(0x04), 0x44.toByte())
+
+            if (responses.isEmpty()) {
+                Log.w(TAG, "No ECUs responded to clear DTC request")
+                return Result.failure(Exception("Keine Antwort von Steuergeräten"))
+            }
+
+            // Check if at least one ECU confirmed the clear
+            val successCount = responses.count { (_, response) ->
+                response.isNotEmpty() && response[0] == 0x44.toByte()
+            }
+
+            Log.i(TAG, "Clear DTCs: $successCount/${responses.size} ECUs confirmed")
+            Result.success(successCount > 0)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to clear DTCs", e)
             Result.failure(e)
@@ -557,18 +702,19 @@ class UsbSlcanDevice(
     /**
      * Read Vehicle Identification Number (VIN)
      * OBD2 Service 0x09 PID 0x02
+     * Note: VIN is typically only available from ECM (0x7E8)
      */
     suspend fun readVin(): Result<String> {
         return try {
-            // Service 09, PID 02 (VIN)
-            val response = sendIsoTp(0x7DF, 0x7E8, byteArrayOf(0x09, 0x02))
+            // VIN is typically only stored in ECM, so direct request is fine
+            val response = sendIsoTp(0x7E0, 0x7E8, byteArrayOf(0x09, 0x02))
                 ?: return Result.failure(Exception("Keine Antwort vom Steuergerät"))
 
             // Response: 49 02 01 <VIN 17 bytes>
             if (response.size >= 4 && response[0] == 0x49.toByte() && response[1] == 0x02.toByte()) {
                 // Skip header bytes (49 02 01) and get VIN
                 val vinBytes = response.drop(3).take(17).toByteArray()
-                val vin = String(vinBytes, Charsets.US_ASCII).trim()
+                val vin = String(vinBytes, Charsets.US_ASCII).trim { it <= ' ' || it == '\u0000' }
                 Log.i(TAG, "Read VIN: $vin")
                 Result.success(vin)
             } else {

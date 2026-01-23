@@ -41,6 +41,11 @@ class CanDataRepository(private val context: Context) {
     private val monitorIdPortIndex = mutableMapOf<Long, Int>()
     private var _overwriteMode = true
 
+    // Frame counts per CAN ID (for overwrite mode counter display)
+    private val frameCountsMap = mutableMapOf<Long, Long>()
+    private val _frameCounts = MutableStateFlow<Map<Long, Long>>(emptyMap())
+    val frameCounts: StateFlow<Map<Long, Long>> = _frameCounts.asStateFlow()
+
     // Frame history for analysis (keeps ALL frames, independent of overwrite mode)
     private val frameHistory = Collections.synchronizedList(mutableListOf<CanFrame>())
     private val maxHistorySize = 10000
@@ -87,6 +92,25 @@ class CanDataRepository(private val context: Context) {
 
     // Signal history buffer for graphing
     private val signalHistoryBuffer = SignalHistoryBuffer(maxSamples = 2000)
+
+    // Real-time ISO-TP reassembly - processes frames as they arrive (thread-safe)
+    private val isoTpLock = Any()
+    private val isoTpPendingMessages = mutableMapOf<Long, PendingIsoTpMessage>()
+    private val _isoTpMessages = MutableStateFlow<Map<Long, List<IsoTpMessage>>>(emptyMap())
+    val isoTpMessages: StateFlow<Map<Long, List<IsoTpMessage>>> = _isoTpMessages.asStateFlow()
+    private val isoTpMessagesMap = mutableMapOf<Long, MutableList<IsoTpMessage>>()
+    private val maxIsoTpMessagesPerCanId = 50
+
+    // Pending ISO-TP message for reassembly
+    private data class PendingIsoTpMessage(
+        val canId: Long,
+        val startTimestamp: Long,
+        val expectedLength: Int,
+        val frames: MutableList<CanFrame>,
+        val payload: MutableList<Byte>,
+        var nextSequence: Int,
+        var lastFrameTime: Long
+    )
 
     // Is logging active
     private val _isLogging = MutableStateFlow(false)
@@ -136,7 +160,7 @@ class CanDataRepository(private val context: Context) {
             }
         }
 
-        // Periodic UI update for sniffer and signals (push to state flow)
+        // Periodic UI update for sniffer, signals, and ISO-TP (push to state flow)
         scope.launch {
             while (true) {
                 kotlinx.coroutines.delay(100)
@@ -144,6 +168,8 @@ class CanDataRepository(private val context: Context) {
                     _snifferFrames.value = snifferDataMap.toMap()
                     _monitorFrames.value = monitorFrameBuffer.toList()
                     _signalValues.value = signalValuesMap.toMap()
+                    _frameCounts.value = frameCountsMap.toMap()
+                    updateIsoTpStateFlow()
                 }
             }
         }
@@ -294,6 +320,154 @@ class CanDataRepository(private val context: Context) {
         _activeDbcFile?.findMessage(frame.id)?.let { message ->
             updateSignalValues(frame, message)
         }
+
+        // Real-time ISO-TP reassembly
+        processIsoTpFrame(frame)
+    }
+
+    /**
+     * Process ISO-TP frame in real-time (thread-safe)
+     */
+    private fun processIsoTpFrame(frame: CanFrame) {
+        if (frame.data.isEmpty()) return
+
+        val frameType = IsoTpReassembler.getFrameType(frame.data)
+        val canId = frame.id
+        val now = frame.timestamp
+
+        synchronized(isoTpLock) {
+        when (frameType) {
+            IsoTpFrameType.SINGLE_FRAME -> {
+                // Complete any pending message (it won't complete)
+                isoTpPendingMessages.remove(canId)
+
+                // Single frame contains complete message
+                val length = frame.data[0].toInt() and 0x0F
+                if (length in 1..7 && frame.data.size > length) {
+                    val payload = frame.data.sliceArray(1..length)
+                    addCompletedIsoTpMessage(
+                        IsoTpMessage(
+                            canId = canId,
+                            startTimestamp = now,
+                            payload = payload,
+                            frames = listOf(frame),
+                            isComplete = true,
+                            expectedLength = length,
+                            actualLength = payload.size
+                        )
+                    )
+                }
+            }
+
+            IsoTpFrameType.FIRST_FRAME -> {
+                // Abandon any pending message for this CAN ID
+                isoTpPendingMessages.remove(canId)
+
+                // Start new multi-frame message
+                if (frame.data.size >= 2) {
+                    val length = ((frame.data[0].toInt() and 0x0F) shl 8) or (frame.data[1].toInt() and 0xFF)
+                    if (length > 7) {
+                        val payload = frame.data.sliceArray(2 until frame.data.size)
+                        isoTpPendingMessages[canId] = PendingIsoTpMessage(
+                            canId = canId,
+                            startTimestamp = now,
+                            expectedLength = length,
+                            frames = mutableListOf(frame),
+                            payload = payload.toMutableList(),
+                            nextSequence = 1,
+                            lastFrameTime = now
+                        )
+                    }
+                }
+            }
+
+            IsoTpFrameType.CONSECUTIVE_FRAME -> {
+                val pending = isoTpPendingMessages[canId]
+                if (pending != null) {
+                    val sequenceNum = frame.data[0].toInt() and 0x0F
+
+                    // Check sequence number (wraps at 16)
+                    if (sequenceNum == pending.nextSequence) {
+                        pending.frames.add(frame)
+                        pending.payload.addAll(frame.data.slice(1 until frame.data.size))
+                        pending.nextSequence = (pending.nextSequence + 1) and 0x0F
+                        pending.lastFrameTime = now
+
+                        // Check if complete
+                        if (pending.payload.size >= pending.expectedLength) {
+                            val trimmedPayload = pending.payload.take(pending.expectedLength).toByteArray()
+                            addCompletedIsoTpMessage(
+                                IsoTpMessage(
+                                    canId = canId,
+                                    startTimestamp = pending.startTimestamp,
+                                    payload = trimmedPayload,
+                                    frames = pending.frames.toList(),
+                                    isComplete = true,
+                                    expectedLength = pending.expectedLength,
+                                    actualLength = trimmedPayload.size
+                                )
+                            )
+                            isoTpPendingMessages.remove(canId)
+                        }
+                    } else {
+                        // Sequence error - abandon this message
+                        isoTpPendingMessages.remove(canId)
+                    }
+                }
+                // Orphan CF without FF - ignore
+            }
+
+            IsoTpFrameType.FLOW_CONTROL -> {
+                // Flow control frames are for TX side, we just observe them
+            }
+
+            IsoTpFrameType.UNKNOWN -> {
+                // Not an ISO-TP frame
+            }
+        }
+        } // synchronized
+    }
+
+    /**
+     * Add completed ISO-TP message to cache (must be called within isoTpLock)
+     */
+    private fun addCompletedIsoTpMessage(message: IsoTpMessage) {
+        val canId = message.canId
+        val messages = isoTpMessagesMap.getOrPut(canId) { mutableListOf() }
+
+        // Add all messages (duplicates filtered in UI via "Identische ausblenden")
+        messages.add(message)
+        // Keep only last N messages per CAN ID
+        while (messages.size > maxIsoTpMessagesPerCanId) {
+            messages.removeAt(0)
+        }
+    }
+
+    /**
+     * Update ISO-TP StateFlow (called periodically to batch updates)
+     */
+    private fun updateIsoTpStateFlow() {
+        synchronized(isoTpLock) {
+            _isoTpMessages.value = isoTpMessagesMap.mapValues { it.value.toList() }
+        }
+    }
+
+    /**
+     * Get ISO-TP messages for a specific CAN ID
+     */
+    fun getIsoTpMessagesForId(canId: Long): List<IsoTpMessage> {
+        return isoTpMessagesMap[canId]?.toList() ?: emptyList()
+    }
+
+    /**
+     * Clear ISO-TP messages
+     */
+    fun clearIsoTpMessages() {
+        synchronized(isoTpLock) {
+            isoTpPendingMessages.clear()
+            isoTpMessagesMap.clear()
+            _isoTpMessages.value = emptyMap()
+        }
     }
 
     /**
@@ -331,6 +505,9 @@ class CanDataRepository(private val context: Context) {
                 frameHistory.removeAt(0)
             }
         }
+
+        // Increment frame count for this CAN ID
+        frameCountsMap[frame.id] = (frameCountsMap[frame.id] ?: 0L) + 1
 
         if (_overwriteMode) {
             // Use combined key of ID + port so same ID on different ports shows separately
@@ -409,11 +586,14 @@ class CanDataRepository(private val context: Context) {
         Log.d(TAG, "Clearing monitor frames (was ${monitorFrameBuffer.size} frames, history: ${frameHistory.size})")
         monitorFrameBuffer.clear()
         monitorIdPortIndex.clear()
+        frameCountsMap.clear()
+        _frameCounts.value = emptyMap()
         synchronized(frameHistory) {
             frameHistory.clear()
         }
         _monitorFrames.value = emptyList()
         _totalFramesCaptured.value = 0
+        clearIsoTpMessages()
     }
 
     fun clearSnifferFrames() {

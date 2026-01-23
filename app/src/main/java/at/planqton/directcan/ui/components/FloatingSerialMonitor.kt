@@ -29,7 +29,11 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import at.planqton.directcan.ui.theme.LocalWindowSizeClass
+import at.planqton.directcan.ui.theme.WindowWidthSizeClass
+import at.planqton.directcan.ui.theme.Dimensions
 import kotlinx.coroutines.launch
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 data class SerialLogEntry(
@@ -54,13 +58,25 @@ fun FloatingSerialMonitor(
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
 
+    // Responsive sizing
+    val windowSizeClass = LocalWindowSizeClass.current
+    val isCompact = windowSizeClass.widthSizeClass == WindowWidthSizeClass.Compact
+
     // Screen dimensions
     val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
 
-    // Position state - start at bottom right
-    var offsetX by remember { mutableFloatStateOf(screenWidthPx - 420f) }
-    var offsetY by remember { mutableFloatStateOf(screenHeightPx - 500f) }
+    // Adaptive window width
+    val windowWidth = if (isCompact) {
+        min(configuration.screenWidthDp - 32, 320).dp
+    } else {
+        380.dp
+    }
+    val windowWidthPx = with(density) { windowWidth.toPx() }
+
+    // Position state - start at bottom right, adjusted for screen size
+    var offsetX by remember { mutableFloatStateOf(screenWidthPx - windowWidthPx - 20f) }
+    var offsetY by remember { mutableFloatStateOf(screenHeightPx - 450f) }
 
     // Minimized state
     var isMinimized by remember { mutableStateOf(false) }
@@ -90,14 +106,14 @@ fun FloatingSerialMonitor(
                 .pointerInput(Unit) {
                     detectDragGestures { change, dragAmount ->
                         change.consume()
-                        offsetX = (offsetX + dragAmount.x).coerceIn(0f, screenWidthPx - 400f)
+                        offsetX = (offsetX + dragAmount.x).coerceIn(0f, screenWidthPx - windowWidthPx)
                         offsetY = (offsetY + dragAmount.y).coerceIn(0f, screenHeightPx - 100f)
                     }
                 }
         ) {
             Surface(
                 modifier = Modifier
-                    .width(if (isMinimized) 160.dp else 380.dp)
+                    .width(if (isMinimized) 140.dp else windowWidth)
                     .then(
                         if (isMinimized) Modifier.height(48.dp)
                         else Modifier.heightIn(min = 200.dp, max = 400.dp)

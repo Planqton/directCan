@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import at.planqton.directcan.DirectCanApplication
 import at.planqton.directcan.data.can.CanFrame
 import at.planqton.directcan.data.can.IsoTpMessage
 import at.planqton.directcan.data.can.IsoTpReassembler
@@ -57,18 +58,27 @@ fun FloatingAnalyseWindow(
     var windowWidth by remember { mutableFloatStateOf(420f) }
     var windowHeight by remember { mutableFloatStateOf(400f) }
 
-    // Filter unique frames
-    val uniqueFrames = remember(frames, hideIdentical) {
-        if (hideIdentical) frames.distinctBy { it.dataHex } else frames
+    // Filter unique frames for display and compute counts
+    val (uniqueFrames, frameCounts) = if (hideIdentical) {
+        val counts = frames.groupingBy { it.dataHex }.eachCount()
+        val unique = frames.distinctBy { it.dataHex }
+        unique to counts
+    } else {
+        frames to emptyMap()
     }
 
-    // Reassemble ISO-TP
-    val isoTpMessages = remember(uniqueFrames) {
-        IsoTpReassembler.reassemble(uniqueFrames)
-    }
+    // Get real-time ISO-TP messages from repository (reassembled as frames arrive)
+    val canDataRepository = DirectCanApplication.instance.canDataRepository
+    val allIsoTpMessages by canDataRepository.isoTpMessages.collectAsState()
+    val messagesForId = allIsoTpMessages[canId] ?: emptyList()
 
-    val uniqueIsoTpMessages = remember(isoTpMessages, hideIdentical) {
-        if (hideIdentical) isoTpMessages.distinctBy { it.payloadHex } else isoTpMessages
+    // Apply hideIdentical filter and compute counts
+    val (uniqueIsoTpMessages, isoTpMessageCounts) = if (hideIdentical) {
+        val counts = messagesForId.groupingBy { it.payloadHex }.eachCount()
+        val unique = messagesForId.distinctBy { it.payloadHex }
+        unique to counts
+    } else {
+        messagesForId to emptyMap()
     }
 
     val isoTpFrameCount = remember(frames) {
@@ -270,8 +280,8 @@ fun FloatingAnalyseWindow(
                         // Content - fills remaining space
                         Box(modifier = Modifier.weight(1f)) {
                             when (selectedTab) {
-                                0 -> FramesList(uniqueFrames, isoTpColor)
-                                1 -> IsoTpList(uniqueIsoTpMessages, isoTpColor)
+                                0 -> FramesList(uniqueFrames, isoTpColor, frameCounts)
+                                1 -> IsoTpList(uniqueIsoTpMessages, isoTpColor, isoTpMessageCounts)
                             }
                         }
                     }
@@ -314,7 +324,11 @@ fun FloatingAnalyseWindow(
 }
 
 @Composable
-private fun FramesList(frames: List<CanFrame>, isoTpColor: Color) {
+private fun FramesList(
+    frames: List<CanFrame>,
+    isoTpColor: Color,
+    frameCounts: Map<String, Int> = emptyMap()
+) {
     if (frames.isEmpty()) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -329,6 +343,7 @@ private fun FramesList(frames: List<CanFrame>, isoTpColor: Color) {
         ) {
             items(frames.sortedByDescending { it.timestamp }) { frame ->
                 val isIsoTp = IsoTpReassembler.isIsoTpFrame(frame.data)
+                val count = frameCounts[frame.dataHex] ?: 1
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     color = if (isIsoTp) isoTpColor.copy(alpha = 0.15f)
@@ -357,6 +372,22 @@ private fun FramesList(frames: List<CanFrame>, isoTpColor: Color) {
                             fontFamily = FontFamily.Monospace,
                             modifier = Modifier.weight(1f)
                         )
+                        // Show count when hiding identical
+                        if (frameCounts.isNotEmpty()) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(2.dp)
+                            ) {
+                                Text(
+                                    "×$count",
+                                    modifier = Modifier.padding(horizontal = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 8.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
                         if (isIsoTp) {
                             Surface(
                                 color = isoTpColor.copy(alpha = 0.3f),
@@ -379,7 +410,11 @@ private fun FramesList(frames: List<CanFrame>, isoTpColor: Color) {
 }
 
 @Composable
-private fun IsoTpList(messages: List<IsoTpMessage>, isoTpColor: Color) {
+private fun IsoTpList(
+    messages: List<IsoTpMessage>,
+    isoTpColor: Color,
+    messageCounts: Map<String, Int> = emptyMap()
+) {
     if (messages.isEmpty()) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -401,6 +436,7 @@ private fun IsoTpList(messages: List<IsoTpMessage>, isoTpColor: Color) {
         ) {
             items(messages) { message ->
                 var expanded by remember { mutableStateOf(false) }
+                val count = messageCounts[message.payloadHex] ?: 1
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -426,17 +462,37 @@ private fun IsoTpList(messages: List<IsoTpMessage>, isoTpColor: Color) {
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            Surface(
-                                color = if (message.isComplete) Color(0xFF4CAF50).copy(alpha = 0.3f)
-                                        else Color(0xFFF44336).copy(alpha = 0.3f),
-                                shape = RoundedCornerShape(2.dp)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    if (message.isComplete) "OK" else "?",
-                                    modifier = Modifier.padding(horizontal = 4.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 9.sp
-                                )
+                                // Show count when hiding identical (count > 0 means we have counts)
+                                if (messageCounts.isNotEmpty()) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = RoundedCornerShape(2.dp)
+                                    ) {
+                                        Text(
+                                            "×$count",
+                                            modifier = Modifier.padding(horizontal = 4.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
+                                Surface(
+                                    color = if (message.isComplete) Color(0xFF4CAF50).copy(alpha = 0.3f)
+                                            else Color(0xFFF44336).copy(alpha = 0.3f),
+                                    shape = RoundedCornerShape(2.dp)
+                                ) {
+                                    Text(
+                                        if (message.isComplete) "OK" else "?",
+                                        modifier = Modifier.padding(horizontal = 4.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 9.sp
+                                    )
+                                }
                             }
                         }
 

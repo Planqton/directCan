@@ -165,13 +165,11 @@ class DirectCanApplication : Application() {
         scope.launch {
             Log.d(TAG, "Starting receivedLinesWithPort collector")
             deviceManager.receivedLinesWithPort.collect { (port, line) ->
-                Log.v(TAG, "Received from port $port: ${line.take(50)}")
                 // Always add to serial monitor (buffer is limited to 500)
                 addSerialLog(SerialLogEntry.Direction.RX, line)
                 CanFrame.fromTextLine(line, port)?.let { frame ->
-                    Log.d(TAG, "Parsed frame: ID=${frame.idHex}, port=$port")
                     canDataRepository.processFrame(frame)
-                } ?: Log.w(TAG, "Failed to parse line: ${line.take(50)}")
+                }
             }
         }
 

@@ -23,6 +23,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontFamily
@@ -33,6 +35,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import at.planqton.directcan.DirectCanApplication
+import at.planqton.directcan.ui.theme.LocalWindowSizeClass
+import at.planqton.directcan.ui.theme.WindowWidthSizeClass
+import at.planqton.directcan.ui.theme.Dimensions
 import at.planqton.directcan.data.settings.SettingsRepository
 import at.planqton.directcan.data.can.CanFrame
 import at.planqton.directcan.data.dbc.DbcFile
@@ -107,6 +112,11 @@ fun MonitorScreen(
     val allFrames by canDataRepository.monitorFrames.collectAsState()
     val totalFramesCaptured by canDataRepository.totalFramesCaptured.collectAsState()
     val framesPerSecond by canDataRepository.framesPerSecond.collectAsState()
+    val frameCounts by canDataRepository.frameCounts.collectAsState()
+
+    // Frame statistics
+    val framesReceived by deviceManager.framesReceived.collectAsState()
+    val droppedFrames by deviceManager.droppedFrames.collectAsState()
 
     var autoScroll by remember { mutableStateOf(true) }
     var overwriteMode by remember { mutableStateOf(true) }
@@ -120,6 +130,11 @@ fun MonitorScreen(
     // CAN Send Panel state
     var showSendPanel by remember { mutableStateOf(false) }
     val context = LocalContext.current
+
+    // Responsive layout
+    val windowSizeClass = LocalWindowSizeClass.current
+    val isCompact = windowSizeClass.widthSizeClass == WindowWidthSizeClass.Compact
+    var showSidebar by remember { mutableStateOf(!isCompact) }  // Hidden by default on compact
 
     // TX Script state
     var showScriptPanel by remember { mutableStateOf(false) }
@@ -385,7 +400,8 @@ fun MonitorScreen(
         sendFrames = sendFrames.map { if (it.id == frameId) update(it) else it }
     }
 
-    Row(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Row(modifier = Modifier.fillMaxSize()) {
         // Main content area - Frame list
         Column(
             modifier = Modifier
@@ -409,6 +425,10 @@ fun MonitorScreen(
                 Text("#", Modifier.width(40.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 VerticalDivider(Modifier.height(16.dp))
                 Text("Time", Modifier.width(70.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                if (overwriteMode) {
+                    VerticalDivider(Modifier.height(16.dp))
+                    Text("Count", Modifier.width(55.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                }
                 VerticalDivider(Modifier.height(16.dp))
                 Text("ID", Modifier.width(70.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                 VerticalDivider(Modifier.height(16.dp))
@@ -477,6 +497,8 @@ fun MonitorScreen(
                             showAscii = showAscii,
                             portColor = getPortColor(frame.port),
                             highlightColor = isoTpHighlight,
+                            overwriteMode = overwriteMode,
+                            frameCount = frameCounts[frame.id] ?: 0L,
                             onClick = {
                                 expandedRowIds = if (expandedRowIds.contains(frame.id)) {
                                     expandedRowIds - frame.id
@@ -704,18 +726,48 @@ fun MonitorScreen(
                                 }
 
                                 // ID
-                                // CAN ID (hex validation)
+                                // CAN ID (hex validation) - stored without 0x prefix
                                 val isCanIdValid = frame.canId.isEmpty() || frame.canId.all { it.isDigit() || it.uppercaseChar() in 'A'..'F' }
+                                // Display with "0x" prefix, store without - use TextFieldValue to control cursor
+                                val displayText = "0x${frame.canId}"
+                                var canIdTextFieldValue by remember(frame.canId) {
+                                    mutableStateOf(TextFieldValue(displayText, TextRange(displayText.length)))
+                                }
                                 OutlinedTextField(
-                                    value = frame.canId,
-                                    onValueChange = { v ->
-                                        // Only allow hex chars, convert to uppercase
-                                        val filtered = v.uppercase().filter { it.isDigit() || it in 'A'..'F' }.take(8)
+                                    value = canIdTextFieldValue,
+                                    onValueChange = { newValue ->
+                                        val text = newValue.text
+                                        // Extract hex part after "0x", filter to hex chars only
+                                        val afterPrefix = when {
+                                            text.startsWith("0x", ignoreCase = true) -> text.substring(2)
+                                            text.startsWith("0") && text.length == 1 -> ""
+                                            text.startsWith("x", ignoreCase = true) -> text.substring(1)
+                                            else -> text.filter { it.isDigit() || it.uppercaseChar() in 'A'..'F' }
+                                        }
+                                        val filtered = afterPrefix.uppercase().filter { it.isDigit() || it in 'A'..'F' }.take(8)
+                                        val newText = "0x$filtered"
+
+                                        // Ensure cursor is never before position 2 (after "0x")
+                                        val cursorPos = maxOf(2, minOf(newValue.selection.start, newText.length))
+                                        val selectionEnd = maxOf(2, minOf(newValue.selection.end, newText.length))
+
+                                        canIdTextFieldValue = TextFieldValue(newText, TextRange(cursorPos, selectionEnd))
                                         updateFrame(frame.id) { it.copy(canId = filtered) }
                                     },
-                                    modifier = Modifier.width(80.dp),
+                                    modifier = Modifier
+                                        .width(95.dp)
+                                        .onFocusChanged { focusState ->
+                                            if (!focusState.isFocused && frame.canId.isNotEmpty()) {
+                                                // Auto-format: pad with leading zeros (3 for standard, 8 for extended)
+                                                val padLength = if (frame.extended) 8 else 3
+                                                val padded = frame.canId.uppercase().padStart(padLength, '0')
+                                                if (padded != frame.canId) {
+                                                    updateFrame(frame.id) { it.copy(canId = padded) }
+                                                }
+                                            }
+                                        },
                                     singleLine = true,
-                                    placeholder = { Text("7DF", fontSize = 13.sp) },
+                                    placeholder = { Text("0x7DF", fontSize = 13.sp) },
                                     textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, fontFamily = FontFamily.Monospace),
                                     isError = !isCanIdValid,
                                     colors = OutlinedTextFieldDefaults.colors(
@@ -769,7 +821,7 @@ fun MonitorScreen(
                                             }
                                         },
                                     singleLine = true,
-                                    placeholder = { Text("02 01 00 00 00 00 00 00", fontSize = 13.sp) },
+                                    placeholder = { Text("Hex Daten...", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
                                     textStyle = LocalTextStyle.current.copy(fontSize = 14.sp, fontFamily = FontFamily.Monospace),
                                     isError = !isDataValid,
                                     colors = OutlinedTextFieldDefaults.colors(
@@ -928,20 +980,41 @@ fun MonitorScreen(
             )
         }
 
-        // Sidebar - Control Panel
-        Surface(
-            modifier = Modifier
-                .width(220.dp)
-                .fillMaxHeight(),
-            tonalElevation = 2.dp
-        ) {
-            Column(
+        // Sidebar - Control Panel (toggleable for small screens)
+        AnimatedVisibility(visible = showSidebar) {
+            Surface(
+                modifier = Modifier
+                    .width(if (isCompact) 180.dp else 220.dp)
+                    .fillMaxHeight(),
+                tonalElevation = 2.dp
+            ) {
+                Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Close button for compact screens
+                if (isCompact) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Einstellungen",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        IconButton(onClick = { showSidebar = false }) {
+                            Icon(Icons.Default.Close, "Schliessen")
+                        }
+                    }
+                    HorizontalDivider()
+                    Spacer(Modifier.height(4.dp))
+                }
+
                 // Statistics
                 Text(
                     "Total Frames Captured:",
@@ -972,6 +1045,63 @@ fun MonitorScreen(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(8.dp))
+
+                // Frame Statistics
+                Text(
+                    "Frames Received:",
+                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "%,d".format(framesReceived),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                // Dropped frames indicator
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (droppedFrames == 0L) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF4CAF50),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "No drops",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF4CAF50)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "%,d dropped".format(droppedFrames),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
 
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
@@ -1288,8 +1418,23 @@ fun MonitorScreen(
                     }
                 }
             }
+          }
         }
-    }
+      }  // End Row
+
+        // FAB to toggle sidebar (only shown on compact screens when sidebar is hidden)
+        if (isCompact && !showSidebar) {
+            FloatingActionButton(
+                onClick = { showSidebar = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Icon(Icons.Default.Menu, "Einstellungen")
+            }
+        }
+    }  // End Box
 
     // Script Error Log Dialog
     if (showScriptErrorLog) {
@@ -1360,6 +1505,8 @@ fun CanFrameRow(
     showAscii: Boolean = true,
     portColor: Color = Color.Gray,
     highlightColor: Color? = null,
+    overwriteMode: Boolean = false,
+    frameCount: Long = 0L,
     onClick: () -> Unit = {},
     onCopy: (String) -> Unit = {},
     onAddToSend: (() -> Unit)? = null,
@@ -1448,6 +1595,19 @@ fun CanFrameRow(
                 textAlign = TextAlign.Center,
                 maxLines = 1
             )
+
+            // Count column (only in overwrite mode)
+            if (overwriteMode) {
+                VerticalDivider(Modifier.height(20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Text(
+                    "%,d".format(frameCount),
+                    modifier = Modifier.width(55.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
             VerticalDivider(Modifier.height(20.dp), color = MaterialTheme.colorScheme.outlineVariant)
 
             // ID

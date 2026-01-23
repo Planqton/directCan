@@ -220,9 +220,32 @@ fun MainAppContent() {
     val isLogging by canDataRepository.isLogging.collectAsState()
     var showExitDialog by remember { mutableStateOf(false) }
 
+    // Connection state monitoring for "Verbindung verloren"
+    val connectionState by deviceManager.connectionState.collectAsState()
+
+    // Stop logging when connection is lost
+    LaunchedEffect(connectionState) {
+        if (connectionState == at.planqton.directcan.data.device.ConnectionState.DISCONNECTED ||
+            connectionState == at.planqton.directcan.data.device.ConnectionState.ERROR) {
+            if (canDataRepository.isLogging.value) {
+                canDataRepository.setLoggingActive(false)
+            }
+        }
+    }
+
+    // Observe errors from device manager and show Toast
+    LaunchedEffect(Unit) {
+        deviceManager.errors.collect { error ->
+            if (error.contains("Verbindung verloren", ignoreCase = true)) {
+                Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     // Snapshot state
     var pendingSnapshot by remember { mutableStateOf<CanDataRepository.SnapshotData?>(null) }
     var showSnapshotDialog by remember { mutableStateOf(false) }
+    var showPathNotSetDialog by remember { mutableStateOf(false) }
 
     // Serial Monitor state
     val serialMonitorVisible by app.serialMonitorVisible.collectAsState()
@@ -292,9 +315,14 @@ fun MainAppContent() {
                 navController = navController,
                 hasActiveChat = openAiChatOverlays.isNotEmpty(),
                 onSnapshotClick = {
-                    // Capture snapshot IMMEDIATELY
-                    pendingSnapshot = canDataRepository.captureSnapshot()
-                    showSnapshotDialog = true
+                    // Check if log directory is configured
+                    if (!canDataRepository.isLogDirectoryConfigured()) {
+                        showPathNotSetDialog = true
+                    } else {
+                        // Capture snapshot IMMEDIATELY
+                        pendingSnapshot = canDataRepository.captureSnapshot()
+                        showSnapshotDialog = true
+                    }
                 },
                 onAiChatClick = { },
                 openAiChatOverlays = openAiChatOverlays,
@@ -466,6 +494,34 @@ fun MainAppContent() {
                 showSnapshotDialog = false
                 pendingSnapshot = null
                 navController.navigate(Screen.LogManager.route)
+            }
+        )
+    }
+
+    // Path not set dialog - shown when trying to create snapshot without log directory configured
+    if (showPathNotSetDialog) {
+        AlertDialog(
+            onDismissRequest = { showPathNotSetDialog = false },
+            icon = { Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("Speicherort nicht festgelegt") },
+            text = {
+                Text("Es wurde noch kein Speicherort für Log-Dateien festgelegt. Möchten Sie jetzt einen Speicherort auswählen?")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showPathNotSetDialog = false
+                        // Navigate to Settings screen - the log storage option is there
+                        navController.navigate(Screen.Settings.route)
+                    }
+                ) {
+                    Text("Ja, zu Einstellungen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPathNotSetDialog = false }) {
+                    Text("Nein")
+                }
             }
         )
     }

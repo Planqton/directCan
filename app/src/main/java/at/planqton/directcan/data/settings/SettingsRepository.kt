@@ -39,6 +39,8 @@ class SettingsRepository(private val context: Context) {
         val PORT_2_COLOR = longPreferencesKey("port_2_color")
         // ISO-TP highlighting
         val ISO_TP_HIGHLIGHT_COLOR = longPreferencesKey("iso_tp_highlight_color")
+        // Buffer size for frame processing
+        val FRAME_BUFFER_SIZE = intPreferencesKey("frame_buffer_size")
     }
 
     // Default port colors
@@ -46,6 +48,9 @@ class SettingsRepository(private val context: Context) {
         const val DEFAULT_PORT_1_COLOR = 0xFF4CAF50L  // Green
         const val DEFAULT_PORT_2_COLOR = 0xFF2196F3L  // Blue
         const val DEFAULT_ISO_TP_HIGHLIGHT_COLOR = 0xFFFF9800L  // Orange
+        const val DEFAULT_FRAME_BUFFER_SIZE = 5000
+        const val MIN_FRAME_BUFFER_SIZE = 1000
+        const val MAX_FRAME_BUFFER_SIZE = 50000
     }
 
     // Language setting: "system", "en", "de"
@@ -218,4 +223,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun setIsoTpHighlightColor(color: Long) {
         context.dataStore.edit { it[Keys.ISO_TP_HIGHLIGHT_COLOR] = color }
     }
+
+    // Frame buffer size setting
+    val frameBufferSize: Flow<Int> = context.dataStore.data.map {
+        it[Keys.FRAME_BUFFER_SIZE] ?: DEFAULT_FRAME_BUFFER_SIZE
+    }
+
+    suspend fun setFrameBufferSize(size: Int) {
+        val clampedSize = size.coerceIn(MIN_FRAME_BUFFER_SIZE, MAX_FRAME_BUFFER_SIZE)
+        context.dataStore.edit { it[Keys.FRAME_BUFFER_SIZE] = clampedSize }
+    }
+
+    suspend fun getFrameBufferSizeSync(): Int =
+        context.dataStore.data.first()[Keys.FRAME_BUFFER_SIZE] ?: DEFAULT_FRAME_BUFFER_SIZE
 }

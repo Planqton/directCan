@@ -246,9 +246,9 @@ class UsbSerialManager(private val context: Context) {
             }
 
             override fun onRunError(e: Exception) {
-                Log.e(TAG, "Serial read error", e)
+                Log.e(TAG, "Serial read error - connection lost", e)
                 scope.launch {
-                    _errors.emit("Read error: ${e.message}")
+                    _errors.emit("Verbindung verloren")
                     _connectionState.value = ConnectionState.ERROR
                 }
             }

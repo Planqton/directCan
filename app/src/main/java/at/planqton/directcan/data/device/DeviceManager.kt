@@ -111,16 +111,23 @@ class DeviceManager(private val context: Context) {
     }.stateIn(scope, SharingStarted.Eagerly, ConnectionState.DISCONNECTED)
 
     // Unified data stream from all active devices (legacy, without port info)
-    private val _receivedLines = MutableSharedFlow<String>(extraBufferCapacity = 1000)
+    private val _receivedLines = MutableSharedFlow<String>(extraBufferCapacity = 5000)
     val receivedLines: SharedFlow<String> = _receivedLines.asSharedFlow()
 
     // Data stream with port info: Pair(port, line)
-    private val _receivedLinesWithPort = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 1000)
+    private val _receivedLinesWithPort = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 5000)
     val receivedLinesWithPort: SharedFlow<Pair<Int, String>> = _receivedLinesWithPort.asSharedFlow()
 
     // Error stream from all active devices
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 100)
     val errors: SharedFlow<String> = _errors.asSharedFlow()
+
+    // Frame statistics for UI display
+    private val _framesReceived = MutableStateFlow(0L)
+    val framesReceived: StateFlow<Long> = _framesReceived.asStateFlow()
+
+    private val _droppedFrames = MutableStateFlow(0L)
+    val droppedFrames: StateFlow<Long> = _droppedFrames.asStateFlow()
 
     // CAN bus bitrate (global setting)
     private val _canBitrate = MutableStateFlow(500000)  // Default 500 kbit/s
@@ -232,20 +239,41 @@ class DeviceManager(private val context: Context) {
             device.receivedLines.collect { line ->
                 // Check if this device is connected on any port
                 val port = getPortForDevice(device.id)
-                Log.i(TAG, "RX from ${device.id}: port=$port, activeDevices=${_activeDevices.value.keys}, line=${line.take(40)}")
 
                 // Always emit data if we have any port (fallback to port 1)
                 val effectivePort = port ?: 1
-                _receivedLinesWithPort.emit(effectivePort to line)
-                _receivedLines.emit(line)
+                // Use tryEmit to avoid blocking if downstream is slow
+                if (_receivedLinesWithPort.tryEmit(effectivePort to line)) {
+                    // Successfully emitted - count received frames
+                    _framesReceived.update { it + 1 }
+                } else {
+                    // Buffer full - frame dropped
+                    _droppedFrames.update { it + 1 }
+                }
+                _receivedLines.tryEmit(line)
             }
         }
         scope.launch {
             device.errors.collect { error ->
-                // Check if this device is connected on any port
+                // Always emit errors from devices that were/are connected
+                // (don't check port here - race condition with state change handler)
+                _errors.emit(error)
+            }
+        }
+
+        // Monitor device connection state to handle disconnections
+        scope.launch {
+            device.connectionState.collect { state ->
                 val port = getPortForDevice(device.id)
                 if (port != null) {
-                    _errors.emit(error)
+                    when (state) {
+                        ConnectionState.DISCONNECTED, ConnectionState.ERROR -> {
+                            Log.w(TAG, "Device ${device.displayName} connection lost on port $port (state=$state)")
+                            // Remove device from active devices
+                            _activeDevices.value = _activeDevices.value - port
+                        }
+                        else -> { /* Connected or connecting - no action needed */ }
+                    }
                 }
             }
         }
@@ -557,5 +585,14 @@ class DeviceManager(private val context: Context) {
             Log.e(TAG, "Connection test failed", e)
             ConnectionTestResult(false, "Fehler: ${e.message ?: "Unbekannter Fehler"}")
         }
+    }
+
+    /**
+     * Reset frame statistics
+     */
+    fun resetFrameStats() {
+        _framesReceived.value = 0
+        _droppedFrames.value = 0
+        Log.d(TAG, "Frame statistics reset")
     }
 }

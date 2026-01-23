@@ -16,6 +16,13 @@ import at.planqton.directcan.DirectCanApplication
 import at.planqton.directcan.data.device.UsbSlcanDevice
 import kotlinx.coroutines.launch
 
+// DTC Types for tab selection
+enum class DtcType(val title: String, val description: String) {
+    STORED("Gespeichert", "Bestätigte Fehlercodes"),
+    PENDING("Ausstehend", "Noch nicht bestätigte Fehler"),
+    PERMANENT("Permanent", "Nicht löschbare Fehler")
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DtcScreen(
@@ -26,14 +33,25 @@ fun DtcScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // DTC state
-    var dtcs by remember { mutableStateOf<List<String>>(emptyList()) }
+    // DTC state - separate lists for each type
+    var storedDtcs by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pendingDtcs by remember { mutableStateOf<List<String>>(emptyList()) }
+    var permanentDtcs by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedDtcType by remember { mutableStateOf(DtcType.STORED) }
+
     var vin by remember { mutableStateOf<String?>(null) }
     var isLoadingDtcs by remember { mutableStateOf(false) }
     var isLoadingVin by remember { mutableStateOf(false) }
     var isClearingDtcs by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showClearConfirm by remember { mutableStateOf(false) }
+
+    // Get current DTCs based on selected type
+    val dtcs = when (selectedDtcType) {
+        DtcType.STORED -> storedDtcs
+        DtcType.PENDING -> pendingDtcs
+        DtcType.PERMANENT -> permanentDtcs
+    }
 
     // Cast to UsbSlcanDevice if available
     val slcanDevice = activeDevice as? UsbSlcanDevice
@@ -193,14 +211,21 @@ fun DtcScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                // Read DTCs Button
+                                // Read ALL DTCs Button (queries all ECUs for all types)
                                 Button(
                                     onClick = {
                                         scope.launch {
                                             isLoadingDtcs = true
+                                            // Read all DTC types from all ECUs
                                             slcanDevice.readDtcs()
-                                                .onSuccess { dtcs = it }
+                                                .onSuccess { storedDtcs = it }
                                                 .onFailure { errorMessage = "DTC Fehler: ${it.message}" }
+                                            slcanDevice.readPendingDtcs()
+                                                .onSuccess { pendingDtcs = it }
+                                                .onFailure { /* Pending might not be supported */ }
+                                            slcanDevice.readPermanentDtcs()
+                                                .onSuccess { permanentDtcs = it }
+                                                .onFailure { /* Permanent might not be supported */ }
                                             isLoadingDtcs = false
                                         }
                                     },
@@ -221,13 +246,13 @@ fun DtcScreen(
                                         )
                                     }
                                     Spacer(Modifier.width(8.dp))
-                                    Text("DTCs lesen")
+                                    Text("Alle DTCs lesen")
                                 }
 
                                 // Clear DTCs Button
                                 OutlinedButton(
                                     onClick = { showClearConfirm = true },
-                                    enabled = !isClearingDtcs && dtcs.isNotEmpty(),
+                                    enabled = !isClearingDtcs && (storedDtcs.isNotEmpty() || pendingDtcs.isNotEmpty()),
                                     colors = ButtonDefaults.outlinedButtonColors(
                                         contentColor = MaterialTheme.colorScheme.error
                                     ),
@@ -248,6 +273,34 @@ fun DtcScreen(
                                     Spacer(Modifier.width(8.dp))
                                     Text("DTCs loeschen")
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // DTC Type Tabs
+                item {
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        DtcType.entries.forEachIndexed { index, dtcType ->
+                            val count = when (dtcType) {
+                                DtcType.STORED -> storedDtcs.size
+                                DtcType.PENDING -> pendingDtcs.size
+                                DtcType.PERMANENT -> permanentDtcs.size
+                            }
+                            SegmentedButton(
+                                selected = selectedDtcType == dtcType,
+                                onClick = { selectedDtcType = dtcType },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = DtcType.entries.size
+                                )
+                            ) {
+                                Text(
+                                    "${dtcType.title}${if (count > 0) " ($count)" else ""}",
+                                    maxLines = 1
+                                )
                             }
                         }
                     }
@@ -277,16 +330,19 @@ fun DtcScreen(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    if (isLoadingDtcs) "Lese Fehlercodes..." else "Keine Fehlercodes gespeichert",
+                                    if (isLoadingDtcs) "Lese Fehlercodes von allen Steuergeraeten..."
+                                    else "Keine ${selectedDtcType.description.lowercase()}",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                         }
                     } else {
                         Text(
-                            "${dtcs.size} Fehlercode(s) gefunden:",
+                            "${dtcs.size} ${selectedDtcType.description} gefunden:",
                             style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.error
+                            color = if (selectedDtcType == DtcType.PERMANENT)
+                                MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -317,14 +373,15 @@ fun DtcScreen(
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    "OBD2 Diagnose",
+                                    "OBD2 Diagnose (Multi-ECU)",
                                     style = MaterialTheme.typography.titleSmall,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    "Diese Funktion liest und loescht Fehlercodes ueber die OBD2-Schnittstelle. " +
-                                            "Unterstuetzt werden alle Fahrzeuge mit OBD2 (ab Baujahr 1996/2001).",
+                                    "Liest Fehlercodes von allen Steuergeraeten (Motor, Getriebe, ABS, Airbag, etc.). " +
+                                            "Unterstuetzt alle OBD2-Fahrzeuge (EU ab 2001, USA ab 1996). " +
+                                            "Permanente DTCs koennen nicht geloescht werden.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
@@ -358,8 +415,10 @@ fun DtcScreen(
                             slcanDevice?.clearDtcs()
                                 ?.onSuccess { success ->
                                     if (success) {
-                                        dtcs = emptyList()
-                                        snackbarHostState.showSnackbar("Fehlercodes geloescht")
+                                        // Clear stored and pending DTCs (permanent cannot be cleared)
+                                        storedDtcs = emptyList()
+                                        pendingDtcs = emptyList()
+                                        snackbarHostState.showSnackbar("Fehlercodes auf allen Steuergeraeten geloescht")
                                     } else {
                                         errorMessage = "Loeschen fehlgeschlagen"
                                     }

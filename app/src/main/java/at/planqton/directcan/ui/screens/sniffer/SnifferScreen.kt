@@ -22,7 +22,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.AnimatedVisibility
 import at.planqton.directcan.DirectCanApplication
+import at.planqton.directcan.ui.theme.LocalWindowSizeClass
+import at.planqton.directcan.ui.theme.WindowWidthSizeClass
 import at.planqton.directcan.data.can.CanFrame
 import at.planqton.directcan.data.device.ConnectionState
 import at.planqton.directcan.data.settings.SettingsRepository
@@ -68,6 +71,11 @@ fun SnifferScreen() {
     // Use shared filter state from repository
     val frameFilter by canDataRepository.frameFilter.collectAsState()
     val knownIds by canDataRepository.knownIds.collectAsState()
+
+    // Responsive layout
+    val windowSizeClass = LocalWindowSizeClass.current
+    val isCompact = windowSizeClass.widthSizeClass == WindowWidthSizeClass.Compact
+    var showSidebar by remember { mutableStateOf(!isCompact) }
 
     // Sniffer options
     var neverExpireIds by remember { mutableStateOf(true) }
@@ -116,9 +124,10 @@ fun SnifferScreen() {
         }
     }
 
-    Row(modifier = Modifier.fillMaxSize()) {
-        // Main content
-        Column(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Row(modifier = Modifier.fillMaxSize()) {
+            // Main content
+            Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight()
@@ -321,20 +330,37 @@ fun SnifferScreen() {
             }
         }
 
-        // Sidebar
-        Surface(
-            modifier = Modifier.width(200.dp).fillMaxHeight(),
-            tonalElevation = 2.dp
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+        // Sidebar (toggleable for small screens)
+        AnimatedVisibility(visible = showSidebar) {
+            Surface(
+                modifier = Modifier.width(if (isCompact) 160.dp else 200.dp).fillMaxHeight(),
+                tonalElevation = 2.dp
             ) {
-                Text("Active IDs:", style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-                Text("${displayList.size}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Close button for compact screens
+                    if (isCompact) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Optionen", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            IconButton(onClick = { showSidebar = false }) {
+                                Icon(Icons.Default.Close, "Schliessen")
+                            }
+                        }
+                        HorizontalDivider()
+                        Spacer(Modifier.height(4.dp))
+                    }
+
+                    Text("Active IDs:", style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text("${displayList.size}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
 
                 Text("Total Frames:", style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                 Text("$totalFrames", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
@@ -554,6 +580,21 @@ fun SnifferScreen() {
                     }
                 }
             }
+          }
+        }  // End AnimatedVisibility
+      }  // End Row
+
+        // FAB to toggle sidebar (only shown on compact screens when sidebar is hidden)
+        if (isCompact && !showSidebar) {
+            FloatingActionButton(
+                onClick = { showSidebar = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Icon(Icons.Default.Menu, "Optionen")
+            }
         }
-    }
+    }  // End Box
 }
