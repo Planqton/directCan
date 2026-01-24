@@ -24,15 +24,31 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
 
-      - name: Rename APK
-        run: mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/DirectCAN-${{ github.ref_name }}.apk
+      - name: Decode signing key
+        run: |
+          echo "${{ secrets.SIGN_KEY }}" | base64 -d > signkey.pk8
+          echo "${{ secrets.SIGN_CERT }}" | base64 -d > signkey.x509.pem
+
+      - name: Sign APK
+        run: |
+          apksigner sign \
+            --key signkey.pk8 \
+            --cert signkey.x509.pem \
+            --out app/build/outputs/apk/release/DirectCAN-${{ github.ref_name }}.apk \
+            app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Verify signature
+        run: apksigner verify --verbose app/build/outputs/apk/release/DirectCAN-${{ github.ref_name }}.apk
+
+      - name: Cleanup keys
+        run: rm -f signkey.pk8 signkey.x509.pem
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/debug/DirectCAN-${{ github.ref_name }}.apk
+          files: app/build/outputs/apk/release/DirectCAN-${{ github.ref_name }}.apk
           generate_release_notes: true
           draft: false
