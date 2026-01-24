@@ -1,3 +1,7 @@
 
 # Release credentials
 release.ini
+
+# Gradle
+.gradle/
+build/
