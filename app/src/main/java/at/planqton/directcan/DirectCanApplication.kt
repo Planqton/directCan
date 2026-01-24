@@ -11,6 +11,7 @@ import at.planqton.directcan.data.settings.SettingsRepository
 import at.planqton.directcan.data.txscript.TxScriptExecutor
 import at.planqton.directcan.data.txscript.TxScriptRepository
 import at.planqton.directcan.data.update.UpdateRepository
+import at.planqton.directcan.data.visualscript.VisualScriptRepository
 import at.planqton.directcan.data.usb.UsbSerialManager
 import at.planqton.directcan.data.device.ConnectionState
 import at.planqton.directcan.data.device.DeviceManager
@@ -55,6 +56,9 @@ class DirectCanApplication : Application() {
         private set
 
     lateinit var updateRepository: UpdateRepository
+        private set
+
+    lateinit var visualScriptRepository: VisualScriptRepository
         private set
 
     // Serial Monitor State
@@ -109,6 +113,7 @@ class DirectCanApplication : Application() {
         deviceManager = DeviceManager(this)
         txScriptExecutor = TxScriptExecutor(usbSerialManager, canDataRepository, deviceManager)
         updateRepository = UpdateRepository(this)
+        visualScriptRepository = VisualScriptRepository(this)
         Log.d(TAG, "All repositories initialized")
 
         // Install default DBC files and restore settings on startup

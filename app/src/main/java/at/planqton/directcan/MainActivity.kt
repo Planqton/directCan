@@ -58,6 +58,8 @@ import at.planqton.directcan.ui.screens.txscript.TxScriptManagerScreen
 import at.planqton.directcan.ui.screens.txscript.ScriptEditorScreen
 import at.planqton.directcan.ui.screens.device.DeviceManagerScreen
 import at.planqton.directcan.ui.screens.obd2.DtcScreen
+import at.planqton.directcan.ui.screens.visualscript.VisualScriptListScreen
+import at.planqton.directcan.ui.screens.visualscript.VisualScriptEditorScreen
 import at.planqton.directcan.ui.components.FloatingSerialMonitor
 import at.planqton.directcan.ui.theme.DirectCanTheme
 import at.planqton.directcan.util.LocaleHelper
@@ -211,6 +213,7 @@ fun MainAppContent() {
     val canDataRepository = app.canDataRepository
     val deviceManager = app.deviceManager
     val aiChatRepository = app.aiChatRepository
+    val scope = rememberCoroutineScope()
 
     // Active AI Chat state
     val activeChatId by aiChatRepository.activeChatId.collectAsState()
@@ -401,6 +404,9 @@ fun MainAppContent() {
                     },
                     onNavigateToTxScriptManager = {
                         navController.navigate(Screen.TxScriptManager.route)
+                    },
+                    onNavigateToVisualScriptManager = {
+                        navController.navigate(Screen.VisualScriptManager.route)
                     }
                 )
             }
@@ -464,6 +470,74 @@ fun MainAppContent() {
                 DtcScreen(
                     onNavigateBack = { navController.popBackStack() }
                 )
+            }
+            composable(Screen.VisualScriptManager.route) {
+                val visualScriptRepository = DirectCanApplication.instance.visualScriptRepository
+                val scripts by visualScriptRepository.scripts.collectAsState()
+
+                VisualScriptListScreen(
+                    scripts = scripts,
+                    onScriptClick = { scriptInfo ->
+                        navController.navigate(Screen.VisualScriptEditor.createRoute(scriptInfo.id))
+                    },
+                    onCreateScript = { /* Handled in screen */ },
+                    onDeleteScript = { scriptInfo ->
+                        scope.launch {
+                            visualScriptRepository.deleteScript(scriptInfo)
+                        }
+                    },
+                    onDuplicateScript = { scriptInfo ->
+                        scope.launch {
+                            visualScriptRepository.duplicateScript(scriptInfo, "${scriptInfo.name}_copy")
+                        }
+                    },
+                    onRenameScript = { /* TODO: Show rename dialog */ },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Screen.VisualScriptEditor.route) { backStackEntry ->
+                val encodedId = backStackEntry.arguments?.getString("scriptId") ?: ""
+                val scriptId = URLDecoder.decode(encodedId, "UTF-8")
+                val visualScriptRepository = DirectCanApplication.instance.visualScriptRepository
+                val scripts by visualScriptRepository.scripts.collectAsState()
+                val scriptInfo = scripts.find { it.id == scriptId }
+
+                var script by remember { mutableStateOf<at.planqton.directcan.data.visualscript.VisualScript?>(null) }
+
+                LaunchedEffect(scriptInfo) {
+                    scriptInfo?.let { info ->
+                        visualScriptRepository.loadScript(info).onSuccess { loadedScript ->
+                            script = loadedScript
+                        }
+                    }
+                }
+
+                script?.let { currentScript ->
+                    VisualScriptEditorScreen(
+                        script = currentScript,
+                        onScriptChange = { updatedScript ->
+                            script = updatedScript
+                        },
+                        onBack = { navController.popBackStack() },
+                        onSave = {
+                            scope.launch {
+                                script?.let { s ->
+                                    visualScriptRepository.saveScript(s)
+                                    Toast.makeText(context, "Script gespeichert", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        onCompile = { /* Compile handled in screen */ },
+                        onRun = {
+                            Toast.makeText(context, "Ausführung noch nicht implementiert", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                } ?: Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
             }
         }
     }

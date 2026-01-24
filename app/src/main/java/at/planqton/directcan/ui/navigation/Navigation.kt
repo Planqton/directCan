@@ -1,6 +1,7 @@
 package at.planqton.directcan.ui.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
@@ -51,6 +52,11 @@ sealed class Screen(
     object DeviceManager : Screen("device_manager", "Verbindungen", Icons.Default.Link)
     // DTC/OBD2 Diagnosis screen
     object Dtc : Screen("dtc", "DTC Diagnose", Icons.Default.CarRepair)
+    // Visual Script screens
+    object VisualScriptManager : Screen("visualscript_manager", "Visual Scripts", Icons.Default.AccountTree)
+    object VisualScriptEditor : Screen("visualscript_editor/{scriptId}", "Visual Editor", Icons.Default.AccountTree) {
+        fun createRoute(scriptId: String) = "visualscript_editor/${java.net.URLEncoder.encode(scriptId, "UTF-8")}"
+    }
 
     companion object {
         // Snapshot button after Settings - no navigation, just action

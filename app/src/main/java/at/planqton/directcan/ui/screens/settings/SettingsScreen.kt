@@ -35,7 +35,8 @@ import at.planqton.directcan.util.LocaleHelper
 fun SettingsScreen(
     onNavigateToLogManager: () -> Unit = {},
     onNavigateToAiSettings: () -> Unit = {},
-    onNavigateToTxScriptManager: () -> Unit = {}
+    onNavigateToTxScriptManager: () -> Unit = {},
+    onNavigateToVisualScriptManager: () -> Unit = {}
 ) {
     val usbManager = DirectCanApplication.instance.usbSerialManager
     val canDataRepository = DirectCanApplication.instance.canDataRepository
@@ -253,6 +254,15 @@ fun SettingsScreen(
                     title = "TX Script Manager",
                     subtitle = "${txScripts.size} Scripts verwalten",
                     onClick = onNavigateToTxScriptManager
+                )
+            }
+
+            item {
+                SettingsItem(
+                    icon = Icons.Default.AccountTree,
+                    title = "Visual Script Editor",
+                    subtitle = "Node-basierte Automatisierung",
+                    onClick = onNavigateToVisualScriptManager
                 )
             }
 
